@@ -84,14 +84,17 @@ def send_welcome(message):
 
 @app.post("/")
 async def process_webhook(
-    transaction_id: str = Form(...),
-    amount: float = Form(...),
-    currency: str = Form(...),
-    status: str = Form(...)
+    request: Request
 ):
-    # Логика обработки
-    return {"message": "Webhook processed successfully"}
-
+    try:
+        form_data = await request.form()
+        logging.info(f"Received webhook data: {form_data}")
+        # Обработка данных...
+        return {"message": "Webhook processed successfully"}
+    except Exception as e:
+        logging.error(f"Error processing webhook: {e}")
+        raise HTTPException(status_code=400, detail="Invalid request")
+        
 @app.get("/")
 async def root():
     return {"message": "Hello, World!"}
