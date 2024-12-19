@@ -70,7 +70,7 @@ async def telegram_webhook(request: Request):
 
 def set_webhook():
     url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
-    webhook_url = "https://ilkbv2909.onrender.com"  # Убедитесь, что этот URL правильный
+    webhook_url = "https://yourdomain.com/telegram"  # Убедитесь, что этот URL правильный
     response = requests.post(url, data={"url": webhook_url})
     if response.status_code == 200:
         print("Webhook установлен успешно.")
