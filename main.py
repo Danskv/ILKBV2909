@@ -95,8 +95,8 @@ async def process_webhook(
         logging.error(f"Error processing webhook: {e}")
         raise HTTPException(status_code=400, detail="Invalid request")
 
-@app.post("/payment_notification")
-async def process_payment_notification(
+@app.post("/pay")
+async def process_pay(
         request: Request,
         sign: str = Header(None)
 ):
@@ -159,6 +159,18 @@ def create_database():
         conn.commit()
 
 create_database()
+
+def update_database():
+    with sqlite3.connect('orders.db') as conn:
+        cursor = conn.cursor()
+        # Добавление столбца order_num, если он не существует
+        cursor.execute('''
+            ALTER TABLE orders
+            ADD COLUMN order_num TEXT
+        ''')
+        conn.commit()
+
+update_database()
 
 # Функция для сохранения транзакции в базе данных
 def save_transaction(transaction_id, amount, currency, status):
@@ -350,11 +362,12 @@ def export_users_confirmation_menu():
     markup.add(InlineKeyboardButton("Отмена", callback_data='admin_confirm_export_no'))
     return markup
 
-def save_order(order_num, user_id):
-    """Сохранение order_num и id пользователя в базу данных."""
+def save_order(order_id, user_id, order_num):
+    """Сохранение order_id, user_id и order_num в базу данных."""
     with sqlite3.connect('orders.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO orders (order_num, user_id) VALUES (?, ?)', (order_num, user_id))
+        cursor.execute('INSERT INTO orders (order_id, user_id, order_num) VALUES (?, ?, ?)',
+                       (order_id, user_id, order_num))
         conn.commit()
 
 def generate_unique_order_num():
