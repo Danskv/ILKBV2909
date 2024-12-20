@@ -83,98 +83,33 @@ def send_welcome(message):
     bot.reply_to(message, "Добро пожаловать!")
 
 @app.post("/")
-async def process_payment_notification(request: Request):
-    form_data = await request.form()
-    logging.info(f"Received webhook data: {form_data}")
+async def process_webhook(
+    transaction_id: str = Form(...),
+    amount: float = Form(...),
+    currency: str = Form(...),
+    status: str = Form(...)
+):
+    # Логика обработки
+    return {"message": "Webhook processed successfully"}
 
-    # Извлечение данных из запроса
-    transaction_id = form_data.get('transaction_id')
-    amount = form_data.get('amount')
-    currency = form_data.get('currency')
-    status = form_data.get('status')
-
-    if not transaction_id or not amount or not currency or not status:
-        raise HTTPException(status_code=400, detail="Missing parameters")
-
-    # Сохранение транзакции в базе данных
-    save_transaction(transaction_id, amount, currency, status)
-
-    # Проверка транзакции
-    if verify_transaction(transaction_id, amount, currency):
-        try:
-            # Отправка сообщения в Telegram
-            user_id = '1982063275'  # Замените на ваш Telegram ID
-            bot.send_message(user_id, "Все прошло успешно!")
-            logging.info("Message sent to Telegram")
-        except Exception as e:
-            logging.error(f"Failed to send message to Telegram: {e}")
-            raise HTTPException(status_code=500, detail="Failed to send message to Telegram")
-        return {"status": "success"}
-
-    return {"status": "ignored"}
-        
 @app.get("/")
 async def root():
     return {"message": "Hello, World!"}
 
+# Создание базы данных и таблицы
 def create_database():
     with sqlite3.connect('orders.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders (
-                order_num TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL
+                order_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                order_num TEXT
             )
         ''')
         conn.commit()
 
 create_database()
-
-# Создание базы данных и таблицы
-def create_database():
-    with sqlite3.connect('transactions.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS transactions (
-                transaction_id TEXT PRIMARY KEY,
-                amount REAL,
-                currency TEXT,
-                status TEXT
-            )
-        ''')
-        conn.commit()
-
-create_database()
-
-# Функция для сохранения транзакции в базе данных
-def save_transaction(transaction_id, amount, currency, status):
-    with sqlite3.connect('transactions.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO transactions (transaction_id, amount, currency, status) VALUES (?, ?, ?, ?)',
-                       (transaction_id, amount, currency, status))
-        conn.commit()
-
-# Функция для проверки транзакции
-def verify_transaction(transaction_id, amount, currency):
-    with sqlite3.connect('transactions.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT status FROM transactions WHERE transaction_id = ? AND amount = ? AND currency = ?',
-                       (transaction_id, amount, currency))
-        result = cursor.fetchone()
-        return result[0] == 'success' if result else False
-
-
-def update_database():
-    with sqlite3.connect('orders.db') as conn:
-        cursor = conn.cursor()
-        # Добавление столбца order_num, если он не существует
-        cursor.execute('''
-            ALTER TABLE orders
-            ADD COLUMN order_num TEXT
-        ''')
-        conn.commit()
-
-update_database()
 
 # Инициализация базы данных
 def init_db():
@@ -350,85 +285,83 @@ def export_users_confirmation_menu():
     return markup
 
 def save_order(order_id, user_id, order_num):
-    """Сохранение order_id, user_id и order_num в базу данных."""
-    with sqlite3.connect('orders.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO orders (order_id, user_id, order_num) VALUES (?, ?, ?)',
-                       (order_id, user_id, order_num))
-        conn.commit()
+        with sqlite3.connect('orders.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('INSERT INTO orders (order_id, user_id, order_num) VALUES (?, ?, ?)',
+                           (order_id, user_id, order_num))
+            conn.commit()
 
-def generate_unique_order_num():
-    """Генерация уникального order_num."""
-    return str(uuid.uuid4())
+    # Генерация уникального order_id
+def generate_unique_order_id():
+        return str(uuid.uuid4())
 
+    # Извлечение всех заказов
 def fetch_orders():
-    """Извлечение всех заказов из базы данных."""
-    with sqlite3.connect('orders.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT order_num, user_id FROM orders')
-        return cursor.fetchall()
-
-def verify_signature(data: dict, signature: str) -> bool:
-    """Проверка подписи запроса."""
-    message = ''.join(f"{key}={value}" for key, value in sorted(data.items()))
-    calculated_signature = hmac.new(
-        secret_key.encode('utf-8'),
-        msg=message.encode('utf-8'),
-        digestmod=hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(calculated_signature, signature)
-
-def get_user_id_by_order_num(order_num):
-    """Получение user_id по order_num из базы данных."""
-    with sqlite3.connect('orders.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM orders WHERE order_num = ?', (order_num,))
-        result = cursor.fetchone()
-        return result[0] if result else None
-
-@app.post("/payment_notification")
-async def process_payment_notification(
-        request: Request,
-        sign: str = Header(None)
-):
-    # Логирование заголовков и данных запроса
-    headers = request.headers
-    form_data = await request.form()
-    logging.info(f"Headers: {headers}")
-    logging.info(f"Form Data: {form_data}")
-
-    data = dict(form_data)
-
-    # Проверяем наличие необходимых полей
-    order_num = data.get('order_num')
-    payment_status = data.get('payment_status')
-
-    if not order_num or not payment_status:
-        raise HTTPException(status_code=400, detail="Missing parameters")
+        with sqlite3.connect('orders.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT order_id, user_id FROM orders')
+            return cursor.fetchall()
 
     # Проверка подписи
-    if not sign or not verify_signature(data, sign):
-        raise HTTPException(status_code=400, detail="Invalid signature")
+def verify_signature(data: dict, signature: str) -> bool:
+        message = ''.join(f"{key}={value}" for key, value in sorted(data.items()))
+        calculated_signature = hmac.new(
+            secret_key.encode('utf-8'),
+            msg=message.encode('utf-8'),
+            digestmod=hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(calculated_signature, signature)
 
-    # Проверка статуса оплаты
-    if payment_status == 'success':
-        user_id = get_user_id_by_order_num(order_num)
-        if user_id:
-            # Отправка сообщения в Telegram
-            bot.send_message(user_id, "Оплата прошла успешно!")
-            return {"status": "success"}
-        else:
-            raise HTTPException(status_code=404, detail="Order number not found")
+    # Получение user_id по order_num
+def get_user_id_by_order_num(order_num):
+        with sqlite3.connect('orders.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT user_id FROM orders WHERE order_num = ?', (order_num,))
+            result = cursor.fetchone()
+            return result[0] if result else None
 
-    return {"status": "ignored"}
+@app.post("/payment_notification")
+async def process_payment_notification(request: Request, sign: str = Header(None)):
+        form_data = await request.form()
+        logging.info(f"Form Data: {form_data}")
 
-def create_payment_link(order_num, product_name, price, quantity, payment_method):
+        # Извлечение данных из запроса
+        order_num = form_data.get('order_num')
+        payment_status = form_data.get('payment_status')
+
+        if not order_num or not payment_status:
+            raise HTTPException(status_code=400, detail="Missing parameters")
+
+        # Проверка подписи
+        if not sign or not verify_signature(dict(form_data), sign):
+            raise HTTPException(status_code=400, detail="Invalid signature")
+
+        # Проверка статуса оплаты
+        if payment_status == 'success':
+            user_id = get_user_id_by_order_num(order_num)
+            if user_id:
+                # Отправка сообщения в Telegram
+                try:
+                    bot.send_message(user_id, "Оплата прошла успешно!")
+                    logging.info(f"Message sent to user {user_id}")
+                except Exception as e:
+                    logging.error(f"Failed to send message to Telegram for user {user_id}: {e}")
+                    raise HTTPException(status_code=500, detail="Failed to send message to Telegram")
+                return {"status": "success"}
+            else:
+                raise HTTPException(status_code=404, detail="Order Num not found")
+        return {"status": "ignored"}
+
+def create_payment_link(product_name, price, quantity, payment_method):
     secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
     link_to_form = 'https://daryasunshine.payform.ru'
 
+    # Генерация уникального order_id
+    order_id = generate_unique_order_id()
+
     order_data = {
-        'order_num': order_num,
-        'customer_phone': '+79998887755',
+        'order_id': order_id,
+        'customer_phone': '+79998887755',  # Замените на реальные данные
         'customer_email': 'user@example.com',  # Замените на реальные данные
         'products': [
             {
@@ -442,7 +375,7 @@ def create_payment_link(order_num, product_name, price, quantity, payment_method
     }
 
     params = {
-        'order_num': order_data['order_num'],
+        'order_id': order_data['order_id'],
         'customer_phone': order_data['customer_phone'],
         'customer_email': order_data['customer_email'],
         'customer_extra': order_data['customer_extra'],
@@ -461,43 +394,42 @@ def create_payment_link(order_num, product_name, price, quantity, payment_method
 
     return payment_url
 
-
+# Обработчик команды /buy
 @bot.message_handler(commands=['buy'])
 def buy(message):
-    user_id = message.chat.id  # Используем chat.id как user_id
-    try:
-        order_num = generate_unique_order_num()
-        product_name = 'Авторское пособие «Личный бренд»'
-        price = 50.00
-        quantity = 1
-        payment_method = 'AC'
+                user_id = message.chat.id  # Используем chat.id как user_id
+                try:
+                    order_id = generate_unique_order_id()
+                    product_name = 'Авторское пособие «Личный бренд»'
+                    price = 50.00
+                    quantity = 1
+                    payment_method = 'AC'
 
-        # Сохраняем order_num и user_id в базе данных
-        save_order(order_num, str(user_id))
+                    # Сохраняем order_id, user_id и order_num в базе данных
+                    save_order(order_id, str(user_id), order_id)  # Используем order_id как order_num
 
-        # Формируем ссылку на оплату
-        payment_link = create_payment_link(order_num, product_name, price, quantity, payment_method)
+                    # Формируем ссылку на оплату
+                    payment_link = create_payment_link(order_id, product_name, price, quantity, payment_method)
 
-        # Отправляем пользователю ссылку на оплату
-        bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
-        logging.info(f"Payment link sent to user {user_id}: {payment_link}")
+                    # Отправляем пользователю ссылку на оплату
+                    bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
+                    logging.info(f"Payment link sent to user {user_id}: {payment_link}")
+                except Exception as e:
+                    logging.error(f"Error processing buy command for user {user_id}: {e}")
+                    bot.send_message(user_id,
+                                     "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
 
-    except Exception as e:
-        logging.error(f"Error processing buy command for user {user_id}: {e}")
-        bot.send_message(user_id, "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
-
-
+            # Обработчик команды /show_orders
 @bot.message_handler(commands=['show_orders'])
 def show_orders(message):
-    orders = fetch_orders()
-    if not orders:
-        response = "Заказы отсутствуют."
-    else:
-        response = "Список заказов:\n"
-        for order_num, user_id in orders:
-            response += f"Order Num: {order_num}, User ID: {user_id}\n"
-
-    bot.send_message(message.chat.id, response)
+                orders = fetch_orders()
+                if not orders:
+                    response = "Заказы отсутствуют."
+                else:
+                    response = "Список заказов:\n"
+                    for order_id, user_id in orders:
+                        response += f"Order ID: {order_id}, User ID: {user_id}\n"
+                bot.send_message(message.chat.id, response)
 
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
