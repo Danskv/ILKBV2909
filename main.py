@@ -94,6 +94,38 @@ async def process_webhook(
     except Exception as e:
         logging.error(f"Error processing webhook: {e}")
         raise HTTPException(status_code=400, detail="Invalid request")
+
+@app.post("/payment_notification")
+async def process_payment_notification(
+        request: Request,
+        sign: str = Header(None)
+):
+    # Логирование заголовков и данных запроса
+    headers = request.headers
+    form_data = await request.json()  # Используем JSON для удобства
+    logging.info(f"Headers: {headers}")
+    logging.info(f"Form Data: {form_data}")
+
+    # Извлечение данных из запроса
+    transaction_id = form_data.get('transaction_id')
+    amount = form_data.get('amount')
+    currency = form_data.get('currency')
+    status = form_data.get('status')
+
+    if not transaction_id or not amount or not currency or not status:
+        raise HTTPException(status_code=400, detail="Missing parameters")
+
+    # Сохранение транзакции в базе данных (для теста)
+    save_transaction(transaction_id, amount, currency, status)
+
+    # Проверка транзакции
+    if verify_transaction(transaction_id, amount, currency):
+        # Отправка сообщения в Telegram
+        user_id = '1982063275'  # Замените на ваш Telegram ID
+        bot.send_message(user_id, "Все прошло успешно!")
+        return {"status": "success"}
+
+    return {"status": "ignored"}
         
 @app.get("/")
 async def root():
@@ -111,6 +143,39 @@ def create_database():
         conn.commit()
 
 create_database()
+
+# Создание базы данных и таблицы
+def create_database():
+    with sqlite3.connect('transactions.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transactions (
+                transaction_id TEXT PRIMARY KEY,
+                amount REAL,
+                currency TEXT,
+                status TEXT
+            )
+        ''')
+        conn.commit()
+
+create_database()
+
+# Функция для сохранения транзакции в базе данных
+def save_transaction(transaction_id, amount, currency, status):
+    with sqlite3.connect('transactions.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO transactions (transaction_id, amount, currency, status) VALUES (?, ?, ?, ?)',
+                       (transaction_id, amount, currency, status))
+        conn.commit()
+
+# Функция для проверки транзакции
+def verify_transaction(transaction_id, amount, currency):
+    with sqlite3.connect('transactions.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT status FROM transactions WHERE transaction_id = ? AND amount = ? AND currency = ?',
+                       (transaction_id, amount, currency))
+        result = cursor.fetchone()
+        return result[0] == 'success' if result else False
 
 # Инициализация базы данных
 def init_db():
