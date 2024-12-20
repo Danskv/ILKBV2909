@@ -83,28 +83,9 @@ def send_welcome(message):
     bot.reply_to(message, "Добро пожаловать!")
 
 @app.post("/")
-async def process_webhook(
-    request: Request
-):
-    try:
-        form_data = await request.form()
-        logging.info(f"Received webhook data: {form_data}")
-        # Обработка данных...
-        return {"message": "Webhook processed successfully"}
-    except Exception as e:
-        logging.error(f"Error processing webhook: {e}")
-        raise HTTPException(status_code=400, detail="Invalid request")
-
-@app.post("/pay")
-async def process_pay(
-        request: Request,
-        sign: str = Header(None)
-):
-    # Логирование заголовков и данных запроса
-    headers = request.headers
-    form_data = await request.json()  # Используем JSON для удобства
-    logging.info(f"Headers: {headers}")
-    logging.info(f"Form Data: {form_data}")
+async def process_payment_notification(request: Request):
+    form_data = await request.form()
+    logging.info(f"Received webhook data: {form_data}")
 
     # Извлечение данных из запроса
     transaction_id = form_data.get('transaction_id')
@@ -115,14 +96,19 @@ async def process_pay(
     if not transaction_id or not amount or not currency or not status:
         raise HTTPException(status_code=400, detail="Missing parameters")
 
-    # Сохранение транзакции в базе данных (для теста)
+    # Сохранение транзакции в базе данных
     save_transaction(transaction_id, amount, currency, status)
 
     # Проверка транзакции
     if verify_transaction(transaction_id, amount, currency):
-        # Отправка сообщения в Telegram
-        user_id = '1982063275'  # Замените на ваш Telegram ID
-        bot.send_message(user_id, "Все прошло успешно!")
+        try:
+            # Отправка сообщения в Telegram
+            user_id = '1982063275'  # Замените на ваш Telegram ID
+            bot.send_message(user_id, "Все прошло успешно!")
+            logging.info("Message sent to Telegram")
+        except Exception as e:
+            logging.error(f"Failed to send message to Telegram: {e}")
+            raise HTTPException(status_code=500, detail="Failed to send message to Telegram")
         return {"status": "success"}
 
     return {"status": "ignored"}
@@ -160,18 +146,6 @@ def create_database():
 
 create_database()
 
-def update_database():
-    with sqlite3.connect('orders.db') as conn:
-        cursor = conn.cursor()
-        # Добавление столбца order_num, если он не существует
-        cursor.execute('''
-            ALTER TABLE orders
-            ADD COLUMN order_num TEXT
-        ''')
-        conn.commit()
-
-update_database()
-
 # Функция для сохранения транзакции в базе данных
 def save_transaction(transaction_id, amount, currency, status):
     with sqlite3.connect('transactions.db') as conn:
@@ -188,6 +162,19 @@ def verify_transaction(transaction_id, amount, currency):
                        (transaction_id, amount, currency))
         result = cursor.fetchone()
         return result[0] == 'success' if result else False
+
+
+def update_database():
+    with sqlite3.connect('orders.db') as conn:
+        cursor = conn.cursor()
+        # Добавление столбца order_num, если он не существует
+        cursor.execute('''
+            ALTER TABLE orders
+            ADD COLUMN order_num TEXT
+        ''')
+        conn.commit()
+
+update_database()
 
 # Инициализация базы данных
 def init_db():
