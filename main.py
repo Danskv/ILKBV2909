@@ -111,6 +111,21 @@ def create_database():
 
 create_database()
 
+def update_database_structure():
+    with sqlite3.connect('orders.db') as conn:
+        cursor = conn.cursor()
+        
+        # Проверка наличия столбца order_num
+        cursor.execute("PRAGMA table_info(orders)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'order_num' not in columns:
+            cursor.execute('ALTER TABLE orders ADD COLUMN order_num TEXT')
+            conn.commit()
+            print("Column order_num added to orders table.")
+
+update_database_structure()
+
 # Инициализация базы данных
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
