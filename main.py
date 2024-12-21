@@ -382,7 +382,7 @@ def create_payment_link(product_name, price, quantity,order_id):
             {
                 'name': product_name,
                 'price': 50.00,
-                'quantity': quantity,
+                'quantity': 1,
             }
         ],
         'customer_extra': 'Полная оплата курса',
