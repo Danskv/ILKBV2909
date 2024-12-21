@@ -381,7 +381,7 @@ def create_payment_link(product_name, price, quantity,order_id):
         'products': [
             {
                 'name': product_name,
-                'price': price,
+                'price': 50.00,
                 'quantity': quantity,
             }
         ],
