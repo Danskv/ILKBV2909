@@ -319,46 +319,58 @@ def get_user_id_by_order_id(order_id):
         result = cursor.fetchone()
         return result[0] if result else None
 
-@app.post("/payment_notification")
-async def process_payment_notification(request: Request, sign: str = Header(None)):
-    # Логирование полного тела запроса для отладки
-    body = await request.body()
-    logging.info(f"Received payment notification: {body.decode('utf-8')}")
+@app.post("/")
+async def process_payment_notification(
+    date: str = Form(...),
+    order_id: str = Form(...),
+    order_num: str = Form(...),
+    domain: str = Form(...),
+    sum: str = Form(...),
+    currency: str = Form(...),
+    customer_phone: str = Form(...),
+    customer_email: str = Form(...),
+    customer_extra: str = Form(...),
+    payment_type: str = Form(...),
+    commission: str = Form(...),
+    commission_sum: str = Form(...),
+    attempt: str = Form(...),
+    payment_status: str = Form(...),
+    payment_status_description: str = Form(...),
+    payment_init: str = Form(...),
+    products_0_name: str = Form(...),
+    products_0_price: str = Form(...),
+    products_0_quantity: str = Form(...),
+    products_0_sum: str = Form(...)
+):
+    try:
+        logging.info("Received webhook data")
 
-    form_data = await request.form()
-    logging.info(f"Form Data: {form_data}")
+        # Подключение к базе данных SQLite
+        with sqlite3.connect('orders.db') as conn:
+            cursor = conn.cursor()
 
-    # Извлечение данных из запроса
-    order_id = form_data.get('order_id')
-    payment_status = form_data.get('payment_status')
+        # Поиск заказа по order_id
+        cursor.execute("SELECT id, telegram_user_id FROM orders WHERE order_id = ?", (order_id,))
+        order = cursor.fetchone()
 
-    if not order_id or not payment_status:
-        logging.error("Missing parameters in payment notification")
-        raise HTTPException(status_code=400, detail="Missing parameters")
-
-    # Проверка подписи
-    if not sign or not verify_signature(dict(form_data), sign):
-        logging.error("Invalid signature in payment notification")
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    # Проверка статуса оплаты
-    if payment_status == 'success':
-        user_id = get_user_id_by_order_id(order_id)
-        if user_id:
-            # Отправка сообщения в Telegram
-            try:
-                bot.send_message(user_id, "Оплата прошла успешно!")
-                logging.info(f"Message sent to user {user_id}")
-            except Exception as e:
-                logging.error(f"Failed to send message to Telegram for user {user_id}: {e}")
-                raise HTTPException(status_code=500, detail="Failed to send message to Telegram")
-            return {"status": "success"}
-        else:
-            logging.error(f"Order ID {order_id} not found in database")
+        if not order:
+            logging.error("Order ID not found in database")
             raise HTTPException(status_code=404, detail="Order ID not found")
-    else:
-        logging.info(f"Payment status is not success for order_id {order_id}, status: {payment_status}")
-        return {"status": "ignored"}
+
+        order_db_id, telegram_user_id = order
+
+        # Проверка статуса оплаты
+        if payment_status == "success":
+            # Отправка сообщения в Telegram
+            message = f"Оплата прошла успешно для заказа с ID: {order_id}"
+            bot.send_message(chat_id=telegram_user_id, text=message)
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing payment notification: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        conn.close()
 
 def create_payment_link(product_name, price, quantity,order_id):
     secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
