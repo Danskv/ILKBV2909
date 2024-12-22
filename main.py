@@ -51,8 +51,13 @@ except Exception as e:
 # Словарь для хранения данных пользователя (состояния)
 user_data = {}
 
+PRIVATE_CHANNEL_ID_MATRIX_YEAR = -100124567890  # Замените на ID вашего канала
+
+# ID закрытого канала
+PRIVATE_CHANNEL_ID = -1002466006418  # Замените на ID вашего канала
+
 # Список ID администраторов (замените на реальные Telegram user IDs)
-ADMIN_IDS = []  # Пример: [111111111, 222222222]
+ADMIN_IDS = [1982063275]  # Пример: [111111111, 222222222]
 
 app = FastAPI()
 
@@ -109,6 +114,19 @@ def create_database():
         conn.commit()
 
 create_database()
+
+def create_matrix_year_database():
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS orders_matrix_year (
+                order_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL
+            )
+        ''')
+        conn.commit()
+
+create_matrix_year_database()
 
 # Инициализация базы данных
 def init_db():
@@ -290,6 +308,12 @@ def save_order(order_id, user_id):
         cursor.execute('INSERT INTO orders (order_id, user_id) VALUES (?, ?)', (order_id, user_id))
         conn.commit()
 
+def save_matrix_year_order(order_id, user_id):
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO orders_matrix_year (order_id, user_id) VALUES (?, ?)', (order_id, user_id))
+        conn.commit()
+
 # Генерация уникального order_id
 def generate_unique_order_id():
     return str(uuid.uuid4())
@@ -299,6 +323,12 @@ def fetch_orders():
     with sqlite3.connect('orders.db') as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT order_id, user_id FROM orders')
+        return cursor.fetchall()
+
+def fetch_matrix_year_orders():
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT order_id, user_id FROM orders_matrix_year')
         return cursor.fetchall()
 
 # Проверка подписи
@@ -318,6 +348,126 @@ def get_user_id_by_order_id(order_id):
         cursor.execute('SELECT user_id FROM orders WHERE order_id = ?', (order_id,))
         result = cursor.fetchone()
         return result[0] if result else None
+
+def get_user_id_by_matrix_year_order_id(order_id):
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM orders_matrix_year WHERE order_id = ?', (order_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+
+@app.post("/")
+async def process_matrix_year_payment_notification(
+    date: str = Form(...),
+    order_id: str = Form(...),
+    order_num: str = Form(...),
+    domain: str = Form(...),
+    sum: str = Form(...),
+    currency: str = Form(...),
+    customer_phone: str = Form(...),
+    customer_email: str = Form(...),
+    customer_extra: str = Form(...),
+    payment_type: str = Form(...),
+    commission: str = Form(...),
+    commission_sum: str = Form(...),
+    attempt: str = Form(...),
+    payment_status: str = Form(...),
+    payment_status_description: str = Form(...),
+    payment_init: str = Form(...),
+    products_0_name: str = Form(...),
+    products_0_price: str = Form(...),
+    products_0_quantity: str = Form(...),
+    products_0_sum: str = Form(...)
+):
+    conn = None  # Инициализация переменной conn
+
+    try:
+        logging.info("Received webhook data for Matrix Year")
+
+        # Подключение к базе данных SQLite
+        conn = sqlite3.connect('orders_matrix_year.db')
+        cursor = conn.cursor()
+
+        # Поиск заказа по order_id
+        cursor.execute("SELECT user_id FROM orders_matrix_year WHERE order_id = ?", (order_id,))
+        order = cursor.fetchone()
+
+        if not order:
+            logging.error("Order ID not found in database")
+            raise HTTPException(status_code=404, detail="Order ID not found")
+
+        user_id = order[0]
+
+        # Проверка статуса оплаты
+        if payment_status == "success":
+            # Отправка объединенного сообщения в Telegram
+            message = (
+                f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
+                "Вы добавлены в закрытый канал для Matrix Year."
+            )
+            bot.send_message(chat_id=user_id, text=message)
+
+            # Добавление пользователя в закрытый канал
+            try:
+                bot.unban_chat_member(PRIVATE_CHANNEL_ID_MATRIX_YEAR, user_id)
+            except Exception as e:
+                logging.error(f"Не удалось добавить пользователя в канал: {e}")
+
+            # Уведомление администраторов
+            admin_message = "Пользователь успешно оплатил товар 'Матрица года'."
+            for admin_id in ADMIN_IDS:
+                bot.send_message(chat_id=admin_id, text=admin_message)
+
+        return {"status": "success"}
+    except Exception as e:
+        logging.error(f"Error processing payment notification for Matrix Year: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+    finally:
+        if conn:
+            conn.close()
+
+def create_matrix_year_payment_link(product_name, price, quantity,order_id):
+    secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
+    link_to_form = 'https://daryasunshine.payform.ru'
+
+    # Генерация уникального order_id
+    order_id = generate_unique_order_id()
+
+    order_data = {
+        'order_id': order_id,
+        'customer_phone': '+79998887755',  # Замените на реальные данные
+        'customer_email': 'user@example.com',  # Замените на реальные данные
+        'products': [
+            {
+                'name': product_name,
+                'price': 50.00,
+                'quantity': 1,
+            }
+        ],
+        'customer_extra': 'Полная оплата за Matrix Year',
+        'do': 'pay',
+    }
+
+    params = {
+        'order_id': order_data['order_id'],
+        'customer_phone': order_data['customer_phone'],
+        'customer_email': order_data['customer_email'],
+        'customer_extra': order_data['customer_extra'],
+        'do': order_data['do'],
+    }
+
+    for idx, product in enumerate(order_data['products']):
+        params[f'products[{idx}][name]'] = product['name']
+        params[f'products[{idx}][price]'] = product['price']
+        params[f'products[{idx}][quantity]'] = product['quantity']
+
+    sorted_params = sorted(params.items())
+    encoded_params = urllib.parse.urlencode(sorted_params)
+    signature = hmac.new(secret_key.encode(), encoded_params.encode(), hashlib.sha256).hexdigest()
+    payment_url = f'{link_to_form}?{encoded_params}&sign={signature}'
+
+    return payment_url
+
 
 @app.post("/")
 async def process_payment_notification(
@@ -361,9 +511,23 @@ async def process_payment_notification(
 
         # Проверка статуса оплаты
         if payment_status == "success":
-            # Отправка сообщения в Telegram
-            message = f"Оплата прошла успешно для заказа с ID: {order_id}"
+            # Отправка объединенного сообщения в Telegram
+            message = (
+                f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
+                "Вы добавлены в закрытый тг канал."
+            )
             bot.send_message(chat_id=telegram_user_id, text=message)
+
+            # Добавление пользователя в закрытый канал
+            try:
+                bot.unban_chat_member(PRIVATE_CHANNEL_ID, telegram_user_id)
+            except Exception as e:
+                logging.error(f"Не удалось добавить пользователя в канал: {e}")
+
+            # Уведомление администраторов
+            admin_message = "Пользователь успешно оплатил товар 'Личный бренд'."
+            for admin_id in ADMIN_IDS:
+                bot.send_message(chat_id=admin_id, text=admin_message)
 
         return {"status": "success"}
     except Exception as e:
@@ -371,6 +535,7 @@ async def process_payment_notification(
         raise HTTPException(status_code=500, detail="Internal Server Error")
     finally:
         conn.close()
+
 
 def create_payment_link(product_name, price, quantity,order_id):
     secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
@@ -413,30 +578,6 @@ def create_payment_link(product_name, price, quantity,order_id):
     payment_url = f'{link_to_form}?{encoded_params}&sign={signature}'
 
     return payment_url
-
-    # Обработчик команды /buy
-@bot.message_handler(commands=['buy'])
-def buy(message):
-        user_id = message.chat.id  # Используем chat.id как user_id
-        try:
-            product_name = 'Авторское пособие «Личный бренд»'
-            price = 50.00
-            quantity = 1
-
-            # Сохраняем order_id и user_id в базе данных
-            order_id = generate_unique_order_id()
-            save_order(order_id, str(user_id))
-
-            # Формируем ссылку на оплату
-            payment_link = create_payment_link(order_id,product_name, price, quantity)
-
-            # Отправляем пользователю ссылку на оплату
-            bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
-            logging.info(f"Payment link sent to user {user_id}: {payment_link}")
-        except Exception as e:
-            logging.error(f"Error processing buy command for user {user_id}: {e}")
-            bot.send_message(user_id, "Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.")
-
 
 # Обработчик команды /show_orders
 @bot.message_handler(commands=['show_orders'])
@@ -874,7 +1015,7 @@ def callback_inline(call):
 Матрица года даёт нам возможность не плыть по течению, а осознанно создавать свою реальность, проживая каждый год как уникальный этап на пути к самореализации и счастью."""
 
         keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💸Купить", url="https://t.me/Matricagoda_bot"))
+        keyboard.add(InlineKeyboardButton("💸Купить", callback_data='💸Купить'))
         keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='moi_produkti'))
 
         try:
@@ -920,7 +1061,7 @@ def callback_inline(call):
 ➡️ Знания можно использовать, как для личного использования (для построения своего личного бренда), так и для работы с клиентами (для мастеров)."""
 
         keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💸Купить", url="https://t.me/Personal_brand_daryasunshinebot"))
+        keyboard.add(InlineKeyboardButton("💴Купить", callback_data='💴Купить'))
         keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='moi_produkti'))
 
         try:
@@ -944,6 +1085,117 @@ def callback_inline(call):
 
         # Увеличиваем счетчик нажатий на кнопку "Личный бренд"
         increment_button_press('Личный бренд')  # Исправлено с 'Матрица года' на 'Личный бренд'
+
+    elif call.data == '💸Купить':
+        text = """Тариф: МАТРИЦА ГОДА
+    Стоимость: 2 025.00 1 590.00 🇷🇺RUB
+    Срок действия: 12 месяцев"""
+
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("💳Оплатить", callback_data='💳Оплатить'))
+        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Матрица года'))
+
+        try:
+            bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=keyboard
+            )
+            user_data[chat_id] = {'state': '💸buy'}
+        except Exception as e:
+            logging.warning(f"Не удалось отредактировать сообщение: {e}")
+            sent = bot.send_message(
+                chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💸buy'}
+
+        increment_button_press('💸Купить')
+
+    elif call.data == '💴Купить':
+        text = """Тариф: Купить авторское пособие «Личный бренд»
+Стоимость: 2 990.00 1 590.00 🇷🇺RUB
+Срок действия: бессрочно"""
+
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("💴Оплатить", callback_data='💴Оплатить'))
+        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Личный бренд'))
+
+        try:
+            bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=call.message.message_id,
+                reply_markup=keyboard
+            )
+            user_data[chat_id] = {'state': '💴buy'}
+        except Exception as e:
+            logging.warning(f"Не удалось отредактировать сообщение: {e}")
+            sent = bot.send_message(
+                chat_id,
+                text=text,
+                reply_markup=keyboard
+            )
+            user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💴buy'}
+
+        increment_button_press('💴Купить')
+
+    elif call.data == '💴Оплатить':
+        user_id = chat_id
+        product_name = 'Авторское пособие «Личный бренд»'
+        price = 50.00
+        quantity = 1
+
+        # Сохраняем order_id и user_id в базе данных
+        order_id = generate_unique_order_id()
+        save_order(order_id, str(user_id))
+
+        # Формируем ссылку на оплату
+        payment_link = create_payment_link(order_id, product_name, price, quantity)
+
+        # Отправляем пользователю ссылку на оплату
+        bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
+        logging.info(f"Payment link sent to user {user_id}: {payment_link}")
+
+        # Создаем клавиатуру только с кнопкой "Назад"
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='💴Купить'))
+
+        # Отправляем сообщение с клавиатурой
+        bot.send_message(user_id, "Вы можете вернуться назад, нажав кнопку ниже:", reply_markup=keyboard)
+
+        # Увеличиваем счетчик нажатий на кнопку "Оплатить"
+        increment_button_press('💴Оплатить')
+
+    elif call.data == '💳Оплатить':
+        user_id = chat_id
+        product_name = 'Matrix Year'
+        price = 50.00
+        quantity = 1
+
+        # Сохраняем order_id и user_id в базе данных
+        order_id = generate_unique_order_id()
+        save_order(order_id, str(user_id))
+
+        # Формируем ссылку на оплату
+        payment_link = create_matrix_year_payment_link(product_name, price, quantity, order_id)
+
+        # Отправляем пользователю ссылку на оплату
+        bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
+        logging.info(f"Payment link sent to user {user_id}: {payment_link}")
+
+        # Создаем клавиатуру только с кнопкой "Назад"
+        keyboard = InlineKeyboardMarkup()
+        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='💸Купить'))
+
+        # Отправляем сообщение с клавиатурой
+        bot.send_message(user_id, "Вы можете вернуться назад, нажав кнопку ниже:", reply_markup=keyboard)
+
+        # Увеличиваем счетчик нажатий на кнопку "Оплатить"
+        increment_button_press('💳Оплатить')
+
 
     elif call.data == 'back_to_main':
         # Попытка отредактировать текущее сообщение на главное меню
