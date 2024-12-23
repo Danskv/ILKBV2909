@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 import httpx
 import uuid
 import schedule
+import io
 
 
 # Настройка логирования
@@ -52,10 +53,12 @@ except Exception as e:
 # Словарь для хранения данных пользователя (состояния)
 user_data = {}
 
-PRIVATE_CHANNEL_ID_MATRIX_YEAR = -100124567890  # Замените на ID вашего канала
+products = {}  # Словарь для хранения созданных товаров
 
 # ID закрытого канала
-PRIVATE_CHANNEL_ID = -1002466006418  # Замените на ID вашего канала
+PRIVATE_CHANNEL_ID = 2318404673  # Замените на ID вашего канала
+
+PRIVATE_CHANNEL_URL = "https://t.me/+U5v5NVMFozxkMTIy"
 
 # Список ID администраторов (замените на реальные Telegram user IDs)
 ADMIN_IDS = [1982063275]  # Пример: [111111111, 222222222]
@@ -83,10 +86,6 @@ def set_webhook():
         print("Ошибка при установке Webhook:", response.text)
 
 set_webhook()
-
-@bot.message_handler(commands=['manya'])
-def send_welcome(message):
-    bot.reply_to(message, "Добро пожаловать!")
 
 @app.post("/")
 async def process_webhook(
@@ -261,14 +260,18 @@ def main_menu(chat_id):
         markup.add(InlineKeyboardButton("🔧 Админ меню", callback_data='admin_menu'))
     return markup
 
-# Функция создания админского меню
-def admin_menu_markup():
+# Функция для отправки админ-меню
+def admin_menu_markup(chat_id):
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("✍️ Создать пост", callback_data='create_post'))
+    markup.add(InlineKeyboardButton("✍️ Создать пост", callback_data='create_post'))  # Оставляем кнопку "Создать пост"
+    markup.add(InlineKeyboardButton("🛒 Создать новый товар", callback_data='create_new_product'))  # Добавляем кнопку "Создать новый товар"
     markup.add(InlineKeyboardButton("📊 Статистика", callback_data='admin_statistika'))
     markup.add(InlineKeyboardButton("Выгрузить всех пользователей", callback_data='admin_export_users'))
     markup.add(InlineKeyboardButton("Анализ кнопок", callback_data='admin_analyze_buttons'))
+    markup.add(InlineKeyboardButton("🛒 Редактировать товары", callback_data='edit_products'))  # Меню редактирования товаров
     markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main'))
+    markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Личный бренд'", callback_data='export_personal_brand'))
+    markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Матрица года'", callback_data='export_matrix_year'))
     return markup
 
 # Функция создания меню запроса изображения
@@ -358,7 +361,7 @@ def check_and_update_subscriptions():
             # Если подписка достигла 365 дней, удалить пользователя из канала
             if new_duration >= 365:
                 try:
-                    bot.kick_chat_member(chat_id=PRIVATE_CHANNEL_ID_MATRIX_YEAR, user_id=user_id)
+                    bot.kick_chat_member(chat_id=PRIVATE_CHANNEL_ID, user_id=user_id)
                     print(f"User {user_id} removed from channel due to subscription expiration.")
                 except Exception as e:
                     print(f"Failed to remove user {user_id}: {e}")
@@ -403,36 +406,38 @@ def get_user_id_by_matrix_year_order_id(order_id):
         result = cursor.fetchone()
         return result[0] if result else None
 
-# Обработка уведомления о платеже для Матрицы года
+
 @app.post("/")
 async def process_matrix_year_payment_notification(
-    date: str = Form(...),
-    order_id: str = Form(...),
-    order_num: str = Form(...),
-    domain: str = Form(...),
-    sum: str = Form(...),
-    currency: str = Form(...),
-    customer_phone: str = Form(...),
-    customer_email: str = Form(...),
-    customer_extra: str = Form(...),
-    payment_type: str = Form(...),
-    commission: str = Form(...),
-    commission_sum: str = Form(...),
-    attempt: str = Form(...),
-    payment_status: str = Form(...),
-    payment_status_description: str = Form(...),
-    payment_init: str = Form(...),
-    products_0_name: str = Form(...),
-    products_0_price: str = Form(...),
-    products_0_quantity: str = Form(...),
-    products_0_sum: str = Form(...)
+        date: str = Form(...),
+        order_id: str = Form(...),
+        order_num: str = Form(...),
+        domain: str = Form(...),
+        sum: str = Form(...),
+        currency: str = Form(...),
+        customer_phone: str = Form(...),
+        customer_email: str = Form(...),
+        customer_extra: str = Form(...),
+        payment_type: str = Form(...),
+        commission: str = Form(...),
+        commission_sum: str = Form(...),
+        attempt: str = Form(...),
+        payment_status: str = Form(...),
+        payment_status_description: str = Form(...),
+        payment_init: str = Form(...),
+        products_0_name: str = Form(...),
+        products_0_price: str = Form(...),
+        products_0_quantity: str = Form(...),
+        products_0_sum: str = Form(...)
 ):
     conn = None  # Инициализация переменной conn
     try:
         logging.info("Received webhook data for Matrix Year")
+
         # Подключение к базе данных SQLite
         conn = sqlite3.connect('orders_matrix_year.db')
         cursor = conn.cursor()
+
         # Поиск заказа по order_id
         cursor.execute("SELECT user_id FROM orders_matrix_year WHERE order_id = ?", (order_id,))
         order = cursor.fetchone()
@@ -440,30 +445,34 @@ async def process_matrix_year_payment_notification(
             logging.error("Order ID not found in database")
             raise HTTPException(status_code=404, detail="Order ID not found")
         user_id = order[0]
+
         # Проверка статуса оплаты
         if payment_status == "success":
-            # Отправка объединенного сообщения в Telegram
+            # Использование фиксированной ссылки на канал
+            invite_link = PRIVATE_CHANNEL_URL  # Вставляем вашу ссылку сюда
+
+            # Отправка сообщения пользователю с пригласительной ссылкой
             message = (
                 f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
-                "Вы добавлены в закрытый тг канал."
+                "Вы можете присоединиться к нашему закрытому каналу по следующей ссылке:\n"
+                f"{invite_link}\n"
+                "Срок действия подписки: 12 месяцев."
             )
             bot.send_message(chat_id=user_id, text=message)
-            # Добавление пользователя в закрытый канал
-            try:
-                bot.unban_chat_member(PRIVATE_CHANNEL_ID_MATRIX_YEAR, user_id)
-                # Обновление срока подписки
-                subscription_duration = 365
-                cursor.execute(
-                    "UPDATE orders_matrix_year SET subscription_duration = ? WHERE order_id = ?",
-                    (subscription_duration, order_id)
-                )
-                conn.commit()
-            except Exception as e:
-                logging.error(f"Не удалось добавить пользователя в канал: {e}")
-            # Уведомление администраторов
+
+            # Обновление срока подписки в базе данных
+            subscription_duration = 365
+            cursor.execute(
+                "UPDATE orders_matrix_year SET subscription_duration = ? WHERE order_id = ?",
+                (subscription_duration, order_id)
+            )
+            conn.commit()
+
+            # Уведомление администраторов без указания user_id
             admin_message = "Пользователь успешно оплатил товар 'Матрица года'."
             for admin_id in ADMIN_IDS:
                 bot.send_message(chat_id=admin_id, text=admin_message)
+
             return {"status": "success"}
     except Exception as e:
         logging.error(f"Error processing payment notification for Matrix Year: {e}")
@@ -515,59 +524,67 @@ def create_matrix_year_payment_link(product_name, price, quantity, order_id):
     return payment_url
 
 
-# Обработка уведомления о платеже для личного бренда
 @app.post("/")
 async def process_personal_brand_payment_notification(
-    date: str = Form(...),
-    order_id: str = Form(...),
-    order_num: str = Form(...),
-    domain: str = Form(...),
-    sum: str = Form(...),
-    currency: str = Form(...),
-    customer_phone: str = Form(...),
-    customer_email: str = Form(...),
-    customer_extra: str = Form(...),
-    payment_type: str = Form(...),
-    commission: str = Form(...),
-    commission_sum: str = Form(...),
-    attempt: str = Form(...),
-    payment_status: str = Form(...),
-    payment_status_description: str = Form(...),
-    payment_init: str = Form(...),
-    products_0_name: str = Form(...),
-    products_0_price: str = Form(...),
-    products_0_quantity: str = Form(...),
-    products_0_sum: str = Form(...)
+        date: str = Form(...),
+        order_id: str = Form(...),
+        order_num: str = Form(...),
+        domain: str = Form(...),
+        sum: str = Form(...),
+        currency: str = Form(...),
+        customer_phone: str = Form(...),
+        customer_email: str = Form(...),
+        customer_extra: str = Form(...),
+        payment_type: str = Form(...),
+        commission: str = Form(...),
+        commission_sum: str = Form(...),
+        attempt: str = Form(...),
+        payment_status: str = Form(...),
+        payment_status_description: str = Form(...),
+        payment_init: str = Form(...),
+        products_0_name: str = Form(...),
+        products_0_price: str = Form(...),
+        products_0_quantity: str = Form(...),
+        products_0_sum: str = Form(...)
 ):
     try:
         logging.info("Received webhook data for Personal Brand")
+
         # Подключение к базе данных SQLite
         with sqlite3.connect('orders_personal_brand.db') as conn:
             cursor = conn.cursor()
+
             # Поиск заказа по order_id
             cursor.execute("SELECT user_id FROM orders_personal_brand WHERE order_id = ?", (order_id,))
             order = cursor.fetchone()
+
             if not order:
                 logging.error("Order ID not found in database")
                 raise HTTPException(status_code=404, detail="Order ID not found")
+
             user_id = order[0]
+
             # Проверка статуса оплаты
             if payment_status == "success":
-                # Отправка объединенного сообщения в Telegram
+                # Используем вашу ссылку на закрытый канал
+                invite_link = "https://t.me/+U5v5NVMFozxkMTIy"  # Ваша ссылка на канал
+
+                # Отправка пользователю сообщения с пригласительной ссылкой
                 message = (
                     f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
-                    "Вы добавлены в закрытый тг канал."
+                    "Вы можете присоединиться к нашему закрытому каналу по следующей ссылке:\n"
+                    f"{invite_link}\n"
+                    "Срок действия подписки: бессрочно."
                 )
                 bot.send_message(chat_id=user_id, text=message)
-                # Добавление пользователя в закрытый канал
-                try:
-                    bot.unban_chat_member(PRIVATE_CHANNEL_ID, user_id)
-                except Exception as e:
-                    logging.error(f"Не удалось добавить пользователя в канал: {e}")
-                # Уведомление администраторов
+
+                # Не нужно обновлять длительность подписки в базе данных, так как она бессрочная
+
+                # Уведомление администраторов без указания user_id
                 admin_message = "Пользователь успешно оплатил товар 'Личный бренд'."
                 for admin_id in ADMIN_IDS:
                     bot.send_message(chat_id=admin_id, text=admin_message)
+
                 return {"status": "success"}
     except Exception as e:
         logging.error(f"Error processing payment notification for Personal Brand: {e}")
@@ -639,6 +656,19 @@ def show_orders(message):
         for order_id, user_id in orders:
             response += f"Order ID: {order_id}, User ID: {user_id}\n"
     bot.send_message(message.chat.id, response)
+
+
+# Команда /test
+@bot.message_handler(commands=['test'])
+def handle_test_command(message):
+    user_id = message.chat.id
+    # Отправляем сообщение, что пользователь был добавлен в канал
+    response = (
+        "Вы добавлены в закрытый канал.\n"
+        f"Вы можете присоединиться к нашему закрытому каналу по следующей ссылке: {PRIVATE_CHANNEL_URL}"
+    )
+
+    bot.send_message(user_id, response)
 
 # Обработчик команды /start
 @bot.message_handler(commands=['start'])
@@ -758,6 +788,142 @@ def send_main_menu_message(chat_id):
         }
     except Exception as e:
         logging.error(f"Не удалось отправить главное меню: {e}")
+
+# Обработчик callback'ов
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = call.message.chat.id
+
+    if call.data == 'create_new_product':
+        bot.send_message(chat_id, "Введите название нового товара.")
+        user_data[chat_id] = {'editing': 'create_new_product_name'}
+
+def edit_products_menu(chat_id):
+    # Пример меню редактирования товаров
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Матрица года", callback_data='edit_matrix_year'))
+    markup.add(InlineKeyboardButton("Личный бренд", callback_data='edit_personal_brand'))
+    markup.add(InlineKeyboardButton("💸Купить", callback_data='edit_💸buy'))
+    markup.add(InlineKeyboardButton("💴Купить", callback_data='edit_💴buy'))
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='admin_menu'))
+
+    bot.send_message(chat_id, "Выберите товар для редактирования:", reply_markup=markup)
+
+# Обработчик callback'ов
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callback(call):
+    chat_id = call.message.chat.id
+
+    if call.data == 'export_personal_brand':
+        export_personal_brand_data(chat_id)  # Выгрузка данных для "Личный бренд"
+
+    elif call.data == 'export_matrix_year':
+        export_matrix_year_data(chat_id)  # Выгрузка данных для "Матрица года"
+
+# Обработчик текстовых сообщений для создания нового товара
+@bot.message_handler(func=lambda message: True)
+def handle_text_message(message):
+    chat_id = message.chat.id
+    text = message.text
+
+    if chat_id in user_data and 'editing' in user_data[chat_id]:
+        editing_type = user_data[chat_id]['editing']
+
+        if editing_type == 'create_new_product_name':
+            product_name = text
+            bot.send_message(chat_id, f"Теперь введите описание для товара '{product_name}'.")
+            user_data[chat_id] = {'editing': 'create_new_product_description', 'product_name': product_name}
+
+        elif editing_type == 'create_new_product_description':
+            product_name = user_data[chat_id]['product_name']
+            description = text
+            add_new_product(product_name, description)
+            bot.send_message(chat_id, f"Товар '{product_name}' с описанием успешно добавлен!")
+            del user_data[chat_id]  # Очищаем данные
+
+# Функция для добавления нового товара в словарь
+def add_new_product(name, description):
+    products[name] = description
+    print(f"Товар '{name}' добавлен с описанием: {description}")
+
+# Функция для выгрузки подписчиков "Личный бренд"
+def export_personal_brand_data(chat_id):
+    # Подключаемся к базе данных
+    with sqlite3.connect('orders_personal_brand.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM orders_personal_brand")
+        rows = cursor.fetchall()
+
+        # Если нет данных в таблице
+        if not rows:
+            bot.send_message(chat_id, "Нет данных для выгрузки.")
+            return
+
+        # Создаём CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['order_id', 'user_id', 'first_name', 'last_name'])
+        writer.writerows(rows)
+        output.seek(0)  # Возвращаемся к началу файла
+
+        # Отправляем файл
+        bot.send_message(chat_id, "Выгрузка подписчиков 'Личный бренд':")
+        bot.send_document(chat_id, io.BytesIO(output.getvalue().encode('utf-8')), filename="personal_brand_subscribers.csv")
+
+# Функция для выгрузки подписчиков "Матрица года"
+def export_matrix_year_data(chat_id):
+    # Подключаемся к базе данных
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM orders_matrix_year")
+        rows = cursor.fetchall()
+
+        # Если нет данных в таблице
+        if not rows:
+            bot.send_message(chat_id, "Нет данных для выгрузки.")
+            return
+
+        # Создаём CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['order_id', 'user_id', 'first_name', 'last_name', 'subscription_duration'])
+        writer.writerows(rows)
+        output.seek(0)  # Возвращаемся к началу файла
+
+        # Отправляем файл
+        bot.send_message(chat_id, "Выгрузка подписчиков 'Матрица года':")
+        bot.send_document(chat_id, io.BytesIO(output.getvalue().encode('utf-8')), filename="matrix_year_subscribers.csv")
+
+# Обработчик текстовых сообщений
+@bot.message_handler(func=lambda message: True)
+def handle_text_message(message):
+    chat_id = message.chat.id
+    text = message.text
+
+    if chat_id in user_data and 'editing' in user_data[chat_id]:
+        editing_type = user_data[chat_id]['editing']
+
+        if editing_type == 'matrix_year_description':
+            # Сохраняем новое описание для "Матрица года"
+            new_description = text
+            bot.send_message(chat_id, f"Описание для 'Матрица года' обновлено:\n{new_description}")
+            del user_data[chat_id]  # Очистим состояние редактирования
+
+        elif editing_type == 'personal_brand_description':
+            # Сохраняем новое описание для "Личный бренд"
+            new_description = text
+            bot.send_message(chat_id, f"Описание для 'Личный бренд' обновлено:\n{new_description}")
+            del user_data[chat_id]  # Очистим состояние редактирования
+
+        elif editing_type == '💸buy_description':
+            new_description = text
+            bot.send_message(chat_id, f"Описание для '💸 Купить' обновлено:\n{new_description}")
+            del user_data[chat_id]
+
+        elif editing_type == '💴buy_description':
+            new_description = text
+            bot.send_message(chat_id, f"Описание для '💴 Купить' обновлено:\n{new_description}")
+            del user_data[chat_id]
 
 # Обработка нажатий кнопок
 @bot.callback_query_handler(func=lambda call: True)
@@ -1137,7 +1303,7 @@ def callback_inline(call):
 
     elif call.data == '💸Купить':
         text = """Тариф: МАТРИЦА ГОДА
-    Стоимость: 2 025.00 1 590.00 🇷🇺RUB
+    Стоимость: ~2 025.00~ 1 590.00 🇷🇺RUB
     Срок действия: 12 месяцев"""
 
         keyboard = InlineKeyboardMarkup()
@@ -1165,8 +1331,8 @@ def callback_inline(call):
 
     elif call.data == '💴Купить':
         text = """Тариф: Купить авторское пособие «Личный бренд»
-Стоимость: 2 990.00 1 590.00 🇷🇺RUB
-Срок действия: бессрочно"""
+    Стоимость: ~2 990.00~ 1 590.00 🇷🇺RUB
+    Срок действия: бессрочно"""
 
         keyboard = InlineKeyboardMarkup()
         keyboard.add(InlineKeyboardButton("💴Оплатить", callback_data='💴Оплатить'))
@@ -1346,6 +1512,29 @@ def callback_inline(call):
             user_data[chat_id]['state'] = 'admin_create_post'
         except Exception as e:
             logging.warning(f"Не удалось отправить сообщение для создания поста: {e}")
+
+    elif call.data == 'edit_products':
+        if chat_id in ADMIN_IDS:
+            # Логика редактирования товаров
+            edit_products_menu(chat_id)
+        else:
+            bot.answer_callback_query(call.id, "У вас нет доступа к этому разделу.")
+
+    elif call.data == 'edit_matrix_year':
+        bot.send_message(chat_id, "Введите новое описание для 'Матрица года'.")
+        user_data[chat_id] = {'editing': 'matrix_year_description'}
+
+    elif call.data == 'edit_personal_brand':
+        bot.send_message(chat_id, "Введите новое описание для 'Личный бренд'.")
+        user_data[chat_id] = {'editing': 'personal_brand_description'}
+
+    elif call.data == 'edit_💸buy':
+        bot.send_message(chat_id, "Введите новое описание для '💸 Купить'.")
+        user_data[chat_id] = {'editing': '💸buy_description'}
+
+    elif call.data == 'edit_💴buy':
+        bot.send_message(chat_id, "Введите новое описание для '💴 Купить'.")
+        user_data[chat_id] = {'editing': '💴buy_description'}
 
     # Добавить изображение
     elif call.data == 'admin_add_image':
@@ -1985,4 +2174,3 @@ if __name__ == "__main__":
     # Используем порт из переменной окружения PORT или 10000 по умолчанию
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-    
