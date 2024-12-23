@@ -7,7 +7,7 @@ from io import StringIO
 import os
 import atexit
 from telebot import apihelper
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import sqlite3
 import logging
@@ -21,6 +21,7 @@ import uvicorn
 from fastapi.responses import JSONResponse
 import httpx
 import uuid
+import schedule
 
 
 # Настройка логирования
@@ -101,31 +102,36 @@ async def process_webhook(
 async def root():
     return {"message": "Hello, World!"}
 
-# Создание базы данных и таблицы
-def create_database():
-    with sqlite3.connect('orders.db') as conn:
+# Создание базы данных и таблицы для личного бренда
+def create_personal_brand_database():
+    with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS orders (
+            CREATE TABLE IF NOT EXISTS orders_personal_brand (
                 order_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL
+                user_id TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT
             )
         ''')
         conn.commit()
 
-create_database()
-
+# Создание базы данных и таблицы для Матрицы года
 def create_matrix_year_database():
     with sqlite3.connect('orders_matrix_year.db') as conn:
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS orders_matrix_year (
                 order_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL
+                user_id TEXT NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                subscription_duration INTEGER
             )
         ''')
         conn.commit()
 
+create_personal_brand_database()
 create_matrix_year_database()
 
 # Инициализация базы данных
@@ -301,35 +307,75 @@ def export_users_confirmation_menu():
     markup.add(InlineKeyboardButton("Отмена", callback_data='admin_confirm_export_no'))
     return markup
 
-# Функция для сохранения заказа
-def save_order(order_id, user_id):
-    with sqlite3.connect('orders.db') as conn:
+# Функция для сохранения заказа для личного бренда
+def save_personal_brand_order(order_id, user_id, first_name, last_name):
+    with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO orders (order_id, user_id) VALUES (?, ?)', (order_id, user_id))
+        cursor.execute('INSERT INTO orders_personal_brand (order_id, user_id, first_name, last_name) VALUES (?, ?, ?, ?)',
+                       (order_id, user_id, first_name, last_name))
         conn.commit()
 
-def save_matrix_year_order(order_id, user_id):
+# Функция для сохранения заказа для Матрицы года
+def save_matrix_year_order(order_id, user_id, first_name, last_name):
     with sqlite3.connect('orders_matrix_year.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO orders_matrix_year (order_id, user_id) VALUES (?, ?)', (order_id, user_id))
+        cursor.execute('INSERT INTO orders_matrix_year (order_id, user_id, first_name, last_name) VALUES (?, ?, ?, ?)',
+                       (order_id, user_id, first_name, last_name))
         conn.commit()
 
 # Генерация уникального order_id
 def generate_unique_order_id():
     return str(uuid.uuid4())
 
-# Извлечение всех заказов
-def fetch_orders():
-    with sqlite3.connect('orders.db') as conn:
+# Извлечение всех заказов для личного бренда
+def fetch_personal_brand_orders():
+    with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT order_id, user_id FROM orders')
+        cursor.execute('SELECT order_id, user_id, first_name, last_name FROM orders_personal_brand')
         return cursor.fetchall()
 
+# Извлечение всех заказов для Матрицы года
 def fetch_matrix_year_orders():
     with sqlite3.connect('orders_matrix_year.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT order_id, user_id FROM orders_matrix_year')
+        cursor.execute('SELECT order_id, user_id, first_name, last_name, subscription_duration FROM orders_matrix_year')
         return cursor.fetchall()
+
+# Функция для проверки и обновления подписки
+def check_and_update_subscriptions():
+    with sqlite3.connect('orders_matrix_year.db') as conn:
+        cursor = conn.cursor()
+        # Извлечь все заказы
+        cursor.execute('SELECT order_id, user_id, subscription_duration FROM orders_matrix_year')
+        orders = cursor.fetchall()
+
+        for order_id, user_id, subscription_duration in orders:
+            # Обновить длительность подписки
+            new_duration = subscription_duration + 1
+            cursor.execute('UPDATE orders_matrix_year SET subscription_duration = ? WHERE order_id = ?', (new_duration, order_id))
+            conn.commit()
+
+            # Если подписка достигла 365 дней, удалить пользователя из канала
+            if new_duration >= 365:
+                try:
+                    bot.kick_chat_member(chat_id=PRIVATE_CHANNEL_ID_MATRIX_YEAR, user_id=user_id)
+                    print(f"User {user_id} removed from channel due to subscription expiration.")
+                except Exception as e:
+                    print(f"Failed to remove user {user_id}: {e}")
+
+# Планирование задачи каждые 24 часа
+schedule.every(24).hours.do(check_and_update_subscriptions)
+
+# Цикл для выполнения запланированных задач
+def run_schedule():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# Запуск планировщика в отдельном потоке
+schedule_thread = threading.Thread(target=run_schedule)
+schedule_thread.start()
+
 
 # Проверка подписи
 def verify_signature(data: dict, signature: str) -> bool:
@@ -341,11 +387,12 @@ def verify_signature(data: dict, signature: str) -> bool:
     ).hexdigest()
     return hmac.compare_digest(calculated_signature, signature)
 
-# Получение user_id по order_id
+
+# Получение user_id по order_id для личного бренда
 def get_user_id_by_order_id(order_id):
-    with sqlite3.connect('orders.db') as conn:
+    with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM orders WHERE order_id = ?', (order_id,))
+        cursor.execute('SELECT user_id FROM orders_personal_brand WHERE order_id = ?', (order_id,))
         result = cursor.fetchone()
         return result[0] if result else None
 
@@ -356,6 +403,7 @@ def get_user_id_by_matrix_year_order_id(order_id):
         result = cursor.fetchone()
         return result[0] if result else None
 
+# Обработка уведомления о платеже для Матрицы года
 @app.post("/")
 async def process_matrix_year_payment_notification(
     date: str = Form(...),
@@ -380,45 +428,43 @@ async def process_matrix_year_payment_notification(
     products_0_sum: str = Form(...)
 ):
     conn = None  # Инициализация переменной conn
-
     try:
         logging.info("Received webhook data for Matrix Year")
-
         # Подключение к базе данных SQLite
         conn = sqlite3.connect('orders_matrix_year.db')
         cursor = conn.cursor()
-
         # Поиск заказа по order_id
         cursor.execute("SELECT user_id FROM orders_matrix_year WHERE order_id = ?", (order_id,))
         order = cursor.fetchone()
-
         if not order:
             logging.error("Order ID not found in database")
             raise HTTPException(status_code=404, detail="Order ID not found")
-
         user_id = order[0]
-
         # Проверка статуса оплаты
         if payment_status == "success":
             # Отправка объединенного сообщения в Telegram
             message = (
                 f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
-                "Вы добавлены в закрытый канал для Matrix Year."
+                "Вы добавлены в закрытый тг канал."
             )
             bot.send_message(chat_id=user_id, text=message)
-
             # Добавление пользователя в закрытый канал
             try:
                 bot.unban_chat_member(PRIVATE_CHANNEL_ID_MATRIX_YEAR, user_id)
+                # Обновление срока подписки
+                subscription_duration = 365
+                cursor.execute(
+                    "UPDATE orders_matrix_year SET subscription_duration = ? WHERE order_id = ?",
+                    (subscription_duration, order_id)
+                )
+                conn.commit()
             except Exception as e:
                 logging.error(f"Не удалось добавить пользователя в канал: {e}")
-
             # Уведомление администраторов
             admin_message = "Пользователь успешно оплатил товар 'Матрица года'."
             for admin_id in ADMIN_IDS:
                 bot.send_message(chat_id=admin_id, text=admin_message)
-
-        return {"status": "success"}
+            return {"status": "success"}
     except Exception as e:
         logging.error(f"Error processing payment notification for Matrix Year: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -426,7 +472,7 @@ async def process_matrix_year_payment_notification(
         if conn:
             conn.close()
 
-def create_matrix_year_payment_link(product_name, price, quantity,order_id):
+def create_matrix_year_payment_link(product_name, price, quantity, order_id):
     secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
     link_to_form = 'https://daryasunshine.payform.ru'
 
@@ -444,7 +490,7 @@ def create_matrix_year_payment_link(product_name, price, quantity,order_id):
                 'quantity': 1,
             }
         ],
-        'customer_extra': 'Полная оплата за Matrix Year',
+        'customer_extra': 'Полная оплата курса',
         'do': 'pay',
     }
 
@@ -469,8 +515,9 @@ def create_matrix_year_payment_link(product_name, price, quantity,order_id):
     return payment_url
 
 
+# Обработка уведомления о платеже для личного бренда
 @app.post("/")
-async def process_payment_notification(
+async def process_personal_brand_payment_notification(
     date: str = Form(...),
     order_id: str = Form(...),
     order_num: str = Form(...),
@@ -493,48 +540,38 @@ async def process_payment_notification(
     products_0_sum: str = Form(...)
 ):
     try:
-        logging.info("Received webhook data")
-
+        logging.info("Received webhook data for Personal Brand")
         # Подключение к базе данных SQLite
-        with sqlite3.connect('orders.db') as conn:
+        with sqlite3.connect('orders_personal_brand.db') as conn:
             cursor = conn.cursor()
-
-        # Поиск заказа по order_id
-        cursor.execute("SELECT id, telegram_user_id FROM orders WHERE order_id = ?", (order_id,))
-        order = cursor.fetchone()
-
-        if not order:
-            logging.error("Order ID not found in database")
-            raise HTTPException(status_code=404, detail="Order ID not found")
-
-        order_db_id, telegram_user_id = order
-
-        # Проверка статуса оплаты
-        if payment_status == "success":
-            # Отправка объединенного сообщения в Telegram
-            message = (
-                f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
-                "Вы добавлены в закрытый тг канал."
-            )
-            bot.send_message(chat_id=telegram_user_id, text=message)
-
-            # Добавление пользователя в закрытый канал
-            try:
-                bot.unban_chat_member(PRIVATE_CHANNEL_ID, telegram_user_id)
-            except Exception as e:
-                logging.error(f"Не удалось добавить пользователя в канал: {e}")
-
-            # Уведомление администраторов
-            admin_message = "Пользователь успешно оплатил товар 'Личный бренд'."
-            for admin_id in ADMIN_IDS:
-                bot.send_message(chat_id=admin_id, text=admin_message)
-
-        return {"status": "success"}
+            # Поиск заказа по order_id
+            cursor.execute("SELECT user_id FROM orders_personal_brand WHERE order_id = ?", (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                logging.error("Order ID not found in database")
+                raise HTTPException(status_code=404, detail="Order ID not found")
+            user_id = order[0]
+            # Проверка статуса оплаты
+            if payment_status == "success":
+                # Отправка объединенного сообщения в Telegram
+                message = (
+                    f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
+                    "Вы добавлены в закрытый тг канал."
+                )
+                bot.send_message(chat_id=user_id, text=message)
+                # Добавление пользователя в закрытый канал
+                try:
+                    bot.unban_chat_member(PRIVATE_CHANNEL_ID, user_id)
+                except Exception as e:
+                    logging.error(f"Не удалось добавить пользователя в канал: {e}")
+                # Уведомление администраторов
+                admin_message = "Пользователь успешно оплатил товар 'Личный бренд'."
+                for admin_id in ADMIN_IDS:
+                    bot.send_message(chat_id=admin_id, text=admin_message)
+                return {"status": "success"}
     except Exception as e:
-        logging.error(f"Error processing payment notification: {e}")
+        logging.error(f"Error processing payment notification for Personal Brand: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
-    finally:
-        conn.close()
 
 
 def create_payment_link(product_name, price, quantity,order_id):
@@ -579,10 +616,22 @@ def create_payment_link(product_name, price, quantity,order_id):
 
     return payment_url
 
+# Обработчик команды /show_orders для Матрицы года
+@bot.message_handler(commands=['show_matrix_year_orders'])
+def show_matrix_year_orders(message):
+    orders = fetch_matrix_year_orders()
+    if not orders:
+        response = "Заказы отсутствуют."
+    else:
+        response = "Список заказов для Матрицы года:\n"
+        for order_id, user_id in orders:
+            response += f"Order ID: {order_id}, User ID: {user_id}\n"
+    bot.send_message(message.chat.id, response)
+
 # Обработчик команды /show_orders
 @bot.message_handler(commands=['show_orders'])
 def show_orders(message):
-    orders = fetch_orders()
+    orders = fetch_personal_brand_orders()
     if not orders:
         response = "Заказы отсутствуют."
     else:
@@ -1144,13 +1193,15 @@ def callback_inline(call):
 
     elif call.data == '💴Оплатить':
         user_id = chat_id
+        first_name = call.message.chat.first_name
+        last_name = call.message.chat.last_name
         product_name = 'Авторское пособие «Личный бренд»'
         price = 50.00
         quantity = 1
 
-        # Сохраняем order_id и user_id в базе данных
+        # Сохраняем order_id, user_id, first_name и last_name в базе данных
         order_id = generate_unique_order_id()
-        save_order(order_id, str(user_id))
+        save_personal_brand_order(order_id, str(user_id), first_name, last_name)
 
         # Формируем ссылку на оплату
         payment_link = create_payment_link(order_id, product_name, price, quantity)
@@ -1171,16 +1222,18 @@ def callback_inline(call):
 
     elif call.data == '💳Оплатить':
         user_id = chat_id
+        first_name = call.message.chat.first_name
+        last_name = call.message.chat.last_name
         product_name = 'Matrix Year'
         price = 50.00
         quantity = 1
 
-        # Сохраняем order_id и user_id в базе данных
+        # Сохраняем order_id, user_id, first_name и last_name в базе данных
         order_id = generate_unique_order_id()
-        save_order(order_id, str(user_id))
+        save_matrix_year_order(order_id, str(user_id), first_name, last_name)
 
         # Формируем ссылку на оплату
-        payment_link = create_matrix_year_payment_link(product_name, price, quantity, order_id)
+        payment_link = create_matrix_year_payment_link(order_id, product_name, price, quantity)
 
         # Отправляем пользователю ссылку на оплату
         bot.send_message(user_id, f"Ссылка на оплату: {payment_link}")
@@ -1932,3 +1985,4 @@ if __name__ == "__main__":
     # Используем порт из переменной окружения PORT или 10000 по умолчанию
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+    
