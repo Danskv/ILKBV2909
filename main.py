@@ -314,8 +314,10 @@ def export_users_confirmation_menu():
 def save_personal_brand_order(order_id, user_id, first_name, last_name):
     with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('INSERT INTO orders_personal_brand (order_id, user_id, first_name, last_name) VALUES (?, ?, ?, ?)',
-                       (order_id, user_id, first_name, last_name))
+        cursor.execute(
+            'INSERT INTO orders_personal_brand (order_id, user_id, first_name, last_name) VALUES (?, ?, ?, ?)',
+            (order_id, user_id, first_name, last_name)
+        )
         conn.commit()
 
 # Функция для сохранения заказа для Матрицы года
@@ -390,7 +392,7 @@ schedule_thread = threading.Thread(target=run_schedule)
 schedule_thread.start()
 
 
-# Проверка подписи
+# Функция проверки подписи
 def verify_signature(data: dict, signature: str) -> bool:
     message = ''.join(f"{key}={value}" for key, value in sorted(data.items()))
     calculated_signature = hmac.new(
@@ -399,7 +401,6 @@ def verify_signature(data: dict, signature: str) -> bool:
         digestmod=hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(calculated_signature, signature)
-
 
 # Получение user_id по order_id для личного бренда
 def get_user_id_by_order_id(order_id):
@@ -534,71 +535,57 @@ def create_matrix_year_payment_link(product_name, price, quantity, order_id):
     return payment_url
 
 
-@app.post("/")
-async def process_personal_brand_payment_notification(
-        date: str = Form(...),
-        order_id: str = Form(...),
-        order_num: str = Form(...),
-        domain: str = Form(...),
-        sum: str = Form(...),
-        currency: str = Form(...),
-        customer_phone: str = Form(...),
-        customer_email: str = Form(...),
-        customer_extra: str = Form(...),
-        payment_type: str = Form(...),
-        commission: str = Form(...),
-        commission_sum: str = Form(...),
-        attempt: str = Form(...),
-        payment_status: str = Form(...),
-        payment_status_description: str = Form(...),
-        payment_init: str = Form(...),
-        products_0_name: str = Form(...),
-        products_0_price: str = Form(...),
-        products_0_quantity: str = Form(...),
-        products_0_sum: str = Form(...)
-):
-    try:
-        logging.info("Received webhook data for Personal Brand")
+@app.post("/payment_notification")
+async def process_payment_notification(request: Request, sign: str = Header(None)):
+    # Логирование заголовков и данных запроса
+    headers = request.headers
+    form_data = await request.form()
+    logging.info(f"Headers: {headers}")
+    logging.info(f"Form Data: {form_data}")
 
-        # Подключение к базе данных SQLite
-        with sqlite3.connect('orders_personal_brand.db') as conn:
-            cursor = conn.cursor()
+    data = dict(form_data)
 
-            # Поиск заказа по order_id
-            cursor.execute("SELECT user_id FROM orders_personal_brand WHERE order_id = ?", (order_id,))
-            order = cursor.fetchone()
+    # Проверяем наличие необходимых полей
+    order_id = data.get('order_id')
+    payment_status = data.get('payment_status')
 
-            if not order:
-                logging.error("Order ID not found in database")
-                raise HTTPException(status_code=404, detail="Order ID not found")
+    if not order_id or not payment_status:
+        raise HTTPException(status_code=400, detail="Missing parameters")
 
-            user_id = order[0]
+    # Проверка подписи
+    if not sign or not verify_signature(data, sign):
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
-            # Проверка статуса оплаты
-            if payment_status == "success":
-                # Используем вашу ссылку на закрытый канал
-                invite_link = "https://t.me/+U5v5NVMFozxkMTIy"  # Ваша ссылка на канал
-
-                # Отправка пользователю сообщения с пригласительной ссылкой
-                message = (
-                    f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
+    # Проверка статуса оплаты
+    if payment_status == 'success':
+        # Получаем user_id по order_id
+        user_id = get_user_id_by_order_id(order_id)
+        if user_id:
+            try:
+                # Отправка сообщения пользователю с пригласительной ссылкой
+                invite_message = (
+                    f"Оплата прошла успешно.\n"
                     "Вы можете присоединиться к нашему закрытому каналу по следующей ссылке:\n"
-                    f"{invite_link}\n"
-                    "Срок действия подписки: бессрочно."
+                    f"{PRIVATE_CHANNEL_URL}\n"
+                    "Срок действия подписки: 12 месяцев."
                 )
-                bot.send_message(chat_id=user_id, text=message)
+                bot.send_message(chat_id=user_id, text=invite_message)
 
-                # Не нужно обновлять длительность подписки в базе данных, так как она бессрочная
-
-                # Уведомление администраторов без указания user_id
-                admin_message = "Пользователь успешно оплатил товар 'Личный бренд'."
+                # Уведомление администраторов о новом успешном платеже
+                admin_message = (
+                    "Новый успешный платёж. Пользователь добавлен в закрытый канал."
+                )
                 for admin_id in ADMIN_IDS:
                     bot.send_message(chat_id=admin_id, text=admin_message)
 
                 return {"status": "success"}
-    except Exception as e:
-        logging.error(f"Error processing payment notification for Personal Brand: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+            except Exception as e:
+                logging.error(f"Ошибка при обработке уведомления об оплате: {e}")
+                raise HTTPException(status_code=500, detail="Internal Server Error")
+        else:
+            raise HTTPException(status_code=404, detail="Order ID not found")
+
+    return {"status": "ignored"}
 
 
 def create_payment_link(product_name, price, quantity,order_id):
