@@ -269,7 +269,7 @@ def admin_menu_markup(chat_id):
     markup.add(InlineKeyboardButton("Выгрузить всех пользователей", callback_data='admin_export_users'))
     markup.add(InlineKeyboardButton("Анализ кнопок", callback_data='admin_analyze_buttons'))
     markup.add(InlineKeyboardButton("🛒 Редактировать товары", callback_data='edit_products'))  # Меню редактирования товаров
-    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main'))
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='main_menu'))
     markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Личный бренд'", callback_data='export_personal_brand'))
     markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Матрица года'", callback_data='export_matrix_year'))
     return markup
@@ -788,89 +788,6 @@ def send_main_menu_message(chat_id):
         }
     except Exception as e:
         logging.error(f"Не удалось отправить главное меню: {e}")
-
-
-# Обработчик callback'ов
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    chat_id = call.message.chat.id
-
-    if call.data == 'create_new_product':
-        bot.send_message(chat_id, "Введите название нового товара.")
-        user_data[chat_id] = {'editing': 'create_new_product_name'}
-
-    elif call.data == 'export_personal_brand':
-        export_personal_brand_data(chat_id)  # Выгрузка данных для "Личный бренд"
-
-    elif call.data == 'export_matrix_year':
-        export_matrix_year_data(chat_id)  # Выгрузка данных для "Матрица года"
-
-    elif call.data == 'edit_matrix_year':
-        # Логика редактирования "Матрица года"
-        bot.send_message(chat_id, "Вы выбрали редактирование Матрицы года.")
-        # Перейдите к состоянию редактирования
-        user_data[chat_id] = {'editing': 'matrix_year_description'}
-
-    elif call.data == 'edit_personal_brand':
-        # Логика редактирования "Личный бренд"
-        bot.send_message(chat_id, "Вы выбрали редактирование Личного бренда.")
-        # Перейдите к состоянию редактирования
-        user_data[chat_id] = {'editing': 'personal_brand_description'}
-
-    elif call.data == 'edit_💸buy':
-        # Логика редактирования "💸 Купить"
-        bot.send_message(chat_id, "Вы выбрали редактирование товара 💸 Купить.")
-        user_data[chat_id] = {'editing': '💸buy_description'}
-
-    elif call.data == 'edit_💴buy':
-        # Логика редактирования "💴 Купить"
-        bot.send_message(chat_id, "Вы выбрали редактирование товара 💴 Купить.")
-        user_data[chat_id] = {'editing': '💴buy_description'}
-
-
-
-# Обработчик текстовых сообщений для создания нового товара и обновления описаний
-@bot.message_handler(func=lambda message: True)
-def handle_text_message(message):
-    chat_id = message.chat.id
-    text = message.text
-
-    if chat_id in user_data and 'editing' in user_data[chat_id]:
-        editing_type = user_data[chat_id]['editing']
-
-        if editing_type == 'create_new_product_name':
-            product_name = text
-            bot.send_message(chat_id, f"Теперь введите описание для товара '{product_name}'.")
-            user_data[chat_id] = {'editing': 'create_new_product_description', 'product_name': product_name}
-
-        elif editing_type == 'create_new_product_description':
-            product_name = user_data[chat_id]['product_name']
-            description = text
-            add_new_product(product_name, description)
-            bot.send_message(chat_id, f"Товар '{product_name}' с описанием успешно добавлен!")
-            del user_data[chat_id]  # Очищаем данные
-
-        elif editing_type == 'matrix_year_description':
-            # Сохраняем новое описание для "Матрица года"
-            new_description = text
-            bot.send_message(chat_id, f"Описание для 'Матрица года' обновлено:\n{new_description}")
-            del user_data[chat_id]  # Очистим состояние редактирования
-
-        elif editing_type == 'personal_brand_description':
-            # Сохраняем новое описание для "Личный бренд"
-            new_description = text
-            bot.send_message(chat_id, f"Описание для 'Личный бренд' обновлено:\n{new_description}")
-            del user_data[chat_id]  # Очистим состояние редактирования
-
-        elif editing_type == '💸buy_description':
-            new_description = text
-            bot.send_message(chat_id, f"Описание для '💸 Купить' обновлено:\n{new_description}")
-            del user_data[chat_id]
-
-        elif editing_type == '💴buy_description':
-            new_description = text
-            bot.send_message(chat_id, f"Описание для '💴 Купить' обновлено:\n{new_description}")
-            del user_data[chat_id]
 
 
 # Функция для добавления нового товара
@@ -1494,7 +1411,7 @@ def callback_inline(call):
                     media=InputMediaPhoto(media=admin_photo_url, caption=admin_text),
                     chat_id=chat_id,
                     message_id=call.message.message_id,
-                    reply_markup=admin_menu_markup()
+                    reply_markup=admin_menu_markup(chat_id)
                 )
                 user_data[chat_id]['state'] = 'admin_menu'
             except Exception as e:
@@ -1504,7 +1421,7 @@ def callback_inline(call):
                     chat_id,
                     photo=admin_photo_url,
                     caption=admin_text,
-                    reply_markup=admin_menu_markup()
+                    reply_markup=admin_menu_markup(chat_id)
                 )
                 user_data[chat_id]['post_creation_messages'].append(sent.message_id)
                 user_data[chat_id]['last_message_id'] = sent.message_id
@@ -1530,16 +1447,28 @@ def callback_inline(call):
         except Exception as e:
             logging.warning(f"Не удалось отправить сообщение для создания поста: {e}")
 
+    elif call.data == 'create_new_product':
+        bot.send_message(chat_id, "Введите название нового товара.")
+        user_data[chat_id] = {'editing': 'create_new_product_name'}
+
+    elif call.data == 'export_personal_brand':
+        export_personal_brand_data(chat_id)  # Выгрузка данных для "Личный бренд"
+
+    elif call.data == 'export_matrix_year':
+        export_matrix_year_data(chat_id)  # Выгрузка данных для "Матрица года"
+
+    elif call.data == 'edit_matrix_year':
+        # Логика редактирования "Матрица года"
+        bot.send_message(chat_id, "Вы выбрали редактирование Матрицы года.")
+        # Перейдите к состоянию редактирования
+        user_data[chat_id] = {'editing': 'matrix_year_description'}
+
     elif call.data == 'edit_products':
         if chat_id in ADMIN_IDS:
             # Логика редактирования товаров
             edit_products_menu(chat_id)
         else:
             bot.answer_callback_query(call.id, "У вас нет доступа к этому разделу.")
-
-    elif call.data == 'edit_matrix_year':
-        bot.send_message(chat_id, "Введите новое описание для 'Матрица года'.")
-        user_data[chat_id] = {'editing': 'matrix_year_description'}
 
     elif call.data == 'edit_personal_brand':
         bot.send_message(chat_id, "Введите новое описание для 'Личный бренд'.")
@@ -1549,9 +1478,6 @@ def callback_inline(call):
         bot.send_message(chat_id, "Введите новое описание для '💸 Купить'.")
         user_data[chat_id] = {'editing': '💸buy_description'}
 
-    elif call.data == 'edit_💴buy':
-        bot.send_message(chat_id, "Введите новое описание для '💴 Купить'.")
-        user_data[chat_id] = {'editing': '💴buy_description'}
 
     # Добавить изображение
     elif call.data == 'admin_add_image':
@@ -1595,7 +1521,7 @@ def callback_inline(call):
                 media=InputMediaPhoto(media=admin_menu_photo_url, caption=admin_text),
                 chat_id=chat_id,
                 message_id=call.message.message_id,
-                reply_markup=admin_menu_markup()
+                reply_markup=admin_menu_markup(chat_id)
             )
             user_data[chat_id]['state'] = 'admin_menu'
         except Exception as e:
@@ -1605,7 +1531,7 @@ def callback_inline(call):
                 chat_id,
                 photo=admin_menu_photo_url,
                 caption=admin_text,
-                reply_markup=admin_menu_markup()
+                reply_markup=admin_menu_markup(chat_id)
             )
             user_data[chat_id]['post_creation_messages'].append(sent.message_id)
             user_data[chat_id]['last_message_id'] = sent.message_id
@@ -1614,7 +1540,7 @@ def callback_inline(call):
     # Отменить создание поста
     elif call.data == 'admin_cancel':
         text = "Создание публикации отменено."
-        markup = admin_menu_markup()
+        markup = admin_menu_markup(chat_id)
         cancel_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
         try:
             sent = bot.send_photo(
@@ -1645,7 +1571,7 @@ def callback_inline(call):
             send_post_to_all(chat_id)
         else:
             text = "Текст поста отсутствует. Отправка отменена."
-            markup = admin_menu_markup()
+            markup = admin_menu_markup(chat_id)
             no_text_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
             try:
                 # Отправляем сообщение об отсутствии текста
@@ -1664,7 +1590,7 @@ def callback_inline(call):
     # Отмена публикации
     elif call.data == 'admin_cancel_publish':
         text = "Создание публикации отменено."
-        markup = admin_menu_markup()
+        markup = admin_menu_markup(chat_id)
         cancel_publish_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
         try:
             sent = bot.send_photo(
@@ -1774,7 +1700,7 @@ def callback_inline(call):
                 buttons_text += f"{button[0]} - {button[1]}\n"
             buttons_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
 
-        markup = admin_menu_markup()
+        markup = admin_menu_markup(chat_id)
         try:
             sent = bot.send_photo(
                 chat_id,
@@ -1811,7 +1737,7 @@ def callback_inline(call):
         users = get_all_users()
         if not users:
             text = "Список пользователей пуст."
-            markup = admin_menu_markup()
+            markup = admin_menu_markup(chat_id)
             empty_users_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
             try:
                 # Отправляем сообщение о пустом списке
@@ -1860,12 +1786,12 @@ def callback_inline(call):
             user_data[chat_id]['post_creation_messages'] = [sent.message_id]
 
         except telebot.apihelper.ApiException as e:
-            bot.send_message(chat_id, "Ошибка при экспорте.", reply_markup=admin_menu_markup())
+            bot.send_message(chat_id, "Ошибка при экспорте.", reply_markup=admin_menu_markup(chat_id))
             logging.error(f"Ошибка при экспорте пользователей: {e}")
 
     elif call.data == 'admin_confirm_export_no':
         text = "Экспорт пользователей отменен."
-        markup = admin_menu_markup()
+        markup = admin_menu_markup(chat_id)
         export_cancel_photo_url = 'https://i.imgur.com/mp2tTUu.jpg'  # Замените на актуальный URL изображения
         try:
             sent = bot.send_photo(
@@ -2183,6 +2109,49 @@ def get_user_count():
         cursor.execute('SELECT COUNT(*) FROM users')
         result = cursor.fetchone()
         return result[0] if result else 0
+
+# Обработчик текстовых сообщений для создания нового товара и обновления описаний
+@bot.message_handler(func=lambda message: True)
+def handle_text_message(message):
+    chat_id = message.chat.id
+    text = message.text
+
+    if chat_id in user_data and 'editing' in user_data[chat_id]:
+        editing_type = user_data[chat_id]['editing']
+
+        if editing_type == 'create_new_product_name':
+            product_name = text
+            bot.send_message(chat_id, f"Теперь введите описание для товара '{product_name}'.")
+            user_data[chat_id] = {'editing': 'create_new_product_description', 'product_name': product_name}
+
+        elif editing_type == 'create_new_product_description':
+            product_name = user_data[chat_id]['product_name']
+            description = text
+            add_new_product(product_name, description)
+            bot.send_message(chat_id, f"Товар '{product_name}' с описанием успешно добавлен!")
+            del user_data[chat_id]  # Очищаем данные
+
+        elif editing_type == 'matrix_year_description':
+            # Сохраняем новое описание для "Матрица года"
+            new_description = text
+            bot.send_message(chat_id, f"Описание для 'Матрица года' обновлено:\n{new_description}")
+            del user_data[chat_id]  # Очистим состояние редактирования
+
+        elif editing_type == 'personal_brand_description':
+            # Сохраняем новое описание для "Личный бренд"
+            new_description = text
+            bot.send_message(chat_id, f"Описание для 'Личный бренд' обновлено:\n{new_description}")
+            del user_data[chat_id]  # Очистим состояние редактирования
+
+        elif editing_type == '💸buy_description':
+            new_description = text
+            bot.send_message(chat_id, f"Описание для '💸 Купить' обновлено:\n{new_description}")
+            del user_data[chat_id]
+
+        elif editing_type == '💴buy_description':
+            new_description = text
+            bot.send_message(chat_id, f"Описание для '💴 Купить' обновлено:\n{new_description}")
+            del user_data[chat_id]
 
 
 # Запуск бота
