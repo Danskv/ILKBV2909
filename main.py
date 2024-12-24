@@ -402,13 +402,15 @@ def verify_signature(data: dict, signature: str) -> bool:
     ).hexdigest()
     return hmac.compare_digest(calculated_signature, signature)
 
-# Получение user_id по order_id для личного бренда
-def get_user_id_by_order_id(order_id):
+
+def get_user_id_by_product_name(product_name: str) -> str:
+    # Считаем product_name эквивалентом order_id
     with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT user_id FROM orders_personal_brand WHERE order_id = ?', (order_id,))
+        cursor.execute('SELECT user_id FROM orders_personal_brand WHERE order_id = ?', (product_name,))
         result = cursor.fetchone()
         return result[0] if result else None
+
 
 def get_user_id_by_matrix_year_order_id(order_id):
     with sqlite3.connect('orders_matrix_year.db') as conn:
@@ -418,79 +420,6 @@ def get_user_id_by_matrix_year_order_id(order_id):
         return result[0] if result else None
 
 
-@app.post("/")
-async def process_matrix_year_payment_notification(
-        date: str = Form(...),
-        order_id: str = Form(...),
-        order_num: str = Form(...),
-        domain: str = Form(...),
-        sum: str = Form(...),
-        currency: str = Form(...),
-        customer_phone: str = Form(...),
-        customer_email: str = Form(...),
-        customer_extra: str = Form(...),
-        payment_type: str = Form(...),
-        commission: str = Form(...),
-        commission_sum: str = Form(...),
-        attempt: str = Form(...),
-        payment_status: str = Form(...),
-        payment_status_description: str = Form(...),
-        payment_init: str = Form(...),
-        products_0_name: str = Form(...),
-        products_0_price: str = Form(...),
-        products_0_quantity: str = Form(...),
-        products_0_sum: str = Form(...)
-):
-    conn = None  # Инициализация переменной conn
-    try:
-        logging.info("Received webhook data for Matrix Year")
-
-        # Подключение к базе данных SQLite
-        conn = sqlite3.connect('orders_matrix_year.db')
-        cursor = conn.cursor()
-
-        # Поиск заказа по order_id
-        cursor.execute("SELECT user_id FROM orders_matrix_year WHERE order_id = ?", (order_id,))
-        order = cursor.fetchone()
-        if not order:
-            logging.error("Order ID not found in database")
-            raise HTTPException(status_code=404, detail="Order ID not found")
-        user_id = order[0]
-
-        # Проверка статуса оплаты
-        if payment_status == "success":
-            # Использование фиксированной ссылки на канал
-            invite_link = PRIVATE_CHANNEL_URL  # Вставляем вашу ссылку сюда
-
-            # Отправка сообщения пользователю с пригласительной ссылкой
-            message = (
-                f"Оплата прошла успешно для заказа с ID: {order_id}.\n"
-                "Вы можете присоединиться к нашему закрытому каналу по следующей ссылке:\n"
-                f"{invite_link}\n"
-                "Срок действия подписки: 12 месяцев."
-            )
-            bot.send_message(chat_id=user_id, text=message)
-
-            # Обновление срока подписки в базе данных
-            subscription_duration = 365
-            cursor.execute(
-                "UPDATE orders_matrix_year SET subscription_duration = ? WHERE order_id = ?",
-                (subscription_duration, order_id)
-            )
-            conn.commit()
-
-            # Уведомление администраторов без указания user_id
-            admin_message = "Пользователь успешно оплатил товар 'Матрица года'."
-            for admin_id in ADMIN_IDS:
-                bot.send_message(chat_id=admin_id, text=admin_message)
-
-            return {"status": "success"}
-    except Exception as e:
-        logging.error(f"Error processing payment notification for Matrix Year: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-    finally:
-        if conn:
-            conn.close()
 
 def create_matrix_year_payment_link(product_name, price, quantity, order_id):
     secret_key = '0118af80a1a25a7ec35edb78b4c7f743f72b8991aee68927add8d07e41e6a5f6'
@@ -546,20 +475,20 @@ async def process_payment_notification(request: Request, sign: str = Header(None
     data = dict(form_data)
 
     # Проверяем наличие необходимых полей
-    order_id = data.get('order_id')
+    product_name = data.get('products[0][name]')
     payment_status = data.get('payment_status')
 
-    if not order_id or not payment_status:
+    if not product_name or not payment_status:
         raise HTTPException(status_code=400, detail="Missing parameters")
 
     # Проверка подписи
     if not sign or not verify_signature(data, sign):
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Проверка статуса оплаты
+    # Если оплата успешна
     if payment_status == 'success':
-        # Получаем user_id по order_id
-        user_id = get_user_id_by_order_id(order_id)
+        # Считаем product_name из уведомления эквивалентным order_id в базе данных
+        user_id = get_user_id_by_product_name(product_name)
         if user_id:
             try:
                 # Отправка сообщения пользователю с пригласительной ссылкой
@@ -583,9 +512,10 @@ async def process_payment_notification(request: Request, sign: str = Header(None
                 logging.error(f"Ошибка при обработке уведомления об оплате: {e}")
                 raise HTTPException(status_code=500, detail="Internal Server Error")
         else:
-            raise HTTPException(status_code=404, detail="Order ID not found")
+            raise HTTPException(status_code=404, detail="Order ID not found in database")
 
     return {"status": "ignored"}
+
 
 
 def create_payment_link(product_name, price, quantity,order_id):
