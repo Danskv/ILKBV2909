@@ -263,13 +263,13 @@ def main_menu(chat_id):
 # Функция для отправки админ-меню
 def admin_menu_markup(chat_id):
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("✍️ Создать пост", callback_data='create_post'))  # Оставляем кнопку "Создать пост"
+    markup.add(InlineKeyboardButton("✍️ Создать пост", callback_data='create_post'))
     markup.add(InlineKeyboardButton("🛒 Создать новый товар", callback_data='create_new_product'))  # Добавляем кнопку "Создать новый товар"
     markup.add(InlineKeyboardButton("📊 Статистика", callback_data='admin_statistika'))
     markup.add(InlineKeyboardButton("Выгрузить всех пользователей", callback_data='admin_export_users'))
     markup.add(InlineKeyboardButton("Анализ кнопок", callback_data='admin_analyze_buttons'))
     markup.add(InlineKeyboardButton("🛒 Редактировать товары", callback_data='edit_products'))  # Меню редактирования товаров
-    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='main_menu'))
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='back_to_main'))
     markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Личный бренд'", callback_data='export_personal_brand'))
     markup.add(InlineKeyboardButton("Выгрузить подписчиков 'Матрица года'", callback_data='export_matrix_year'))
     return markup
@@ -330,19 +330,29 @@ def save_matrix_year_order(order_id, user_id, first_name, last_name):
 def generate_unique_order_id():
     return str(uuid.uuid4())
 
-# Извлечение всех заказов для личного бренда
 def fetch_personal_brand_orders():
     with sqlite3.connect('orders_personal_brand.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT order_id, user_id, first_name, last_name FROM orders_personal_brand')
-        return cursor.fetchall()
+        try:
+            cursor.execute('SELECT order_id, user_id, first_name, last_name FROM orders_personal_brand')
+            orders = cursor.fetchall()
+            print(f"Fetched orders: {orders}")  # Отладочное сообщение
+            return [(order[0], order[1]) for order in orders]
+        except Exception as e:
+            print(f"Error fetching personal brand orders: {e}")
+            return []
 
-# Извлечение всех заказов для Матрицы года
 def fetch_matrix_year_orders():
     with sqlite3.connect('orders_matrix_year.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT order_id, user_id, first_name, last_name, subscription_duration FROM orders_matrix_year')
-        return cursor.fetchall()
+        try:
+            cursor.execute('SELECT order_id, user_id, first_name, last_name, subscription_duration FROM orders_matrix_year')
+            orders = cursor.fetchall()
+            print(f"Fetched orders: {orders}")  # Отладочное сообщение
+            return [(order[0], order[1]) for order in orders]  # Возвращаем только order_id и user_id
+        except Exception as e:
+            print(f"Error fetching matrix year orders: {e}")
+            return []
 
 # Функция для проверки и обновления подписки
 def check_and_update_subscriptions():
@@ -633,7 +643,7 @@ def create_payment_link(product_name, price, quantity,order_id):
 
     return payment_url
 
-# Обработчик команды /show_orders для Матрицы года
+# Обработчик команды /show_matrix_year_orders для Матрицы года
 @bot.message_handler(commands=['show_matrix_year_orders'])
 def show_matrix_year_orders(message):
     orders = fetch_matrix_year_orders()
@@ -645,14 +655,14 @@ def show_matrix_year_orders(message):
             response += f"Order ID: {order_id}, User ID: {user_id}\n"
     bot.send_message(message.chat.id, response)
 
-# Обработчик команды /show_orders
+# Обработчик команды /show_orders для личного бренда
 @bot.message_handler(commands=['show_orders'])
 def show_orders(message):
     orders = fetch_personal_brand_orders()
     if not orders:
         response = "Заказы отсутствуют."
     else:
-        response = "Список заказов:\n"
+        response = "Список заказов для Личного бренда:\n"
         for order_id, user_id in orders:
             response += f"Order ID: {order_id}, User ID: {user_id}\n"
     bot.send_message(message.chat.id, response)
@@ -795,59 +805,6 @@ def add_new_product(name, description):
     products[name] = description
     print(f"Товар '{name}' добавлен с описанием: {description}")
 
-
-# Функция для выгрузки подписчиков "Личный бренд"
-def export_personal_brand_data(chat_id):
-    # Подключаемся к базе данных
-    with sqlite3.connect('orders_personal_brand.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM orders_personal_brand")
-        rows = cursor.fetchall()
-
-        # Если нет данных в таблице
-        if not rows:
-            bot.send_message(chat_id, "Нет данных для выгрузки.")
-            return
-
-        # Создаём CSV
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['order_id', 'user_id', 'first_name', 'last_name'])
-        writer.writerows(rows)
-        output.seek(0)  # Возвращаемся к началу файла
-
-        # Отправляем файл
-        bot.send_message(chat_id, "Выгрузка подписчиков 'Личный бренд':")
-        bot.send_document(chat_id, io.BytesIO(output.getvalue().encode('utf-8')),
-                          filename="personal_brand_subscribers.csv")
-
-
-# Функция для выгрузки подписчиков "Матрица года"
-def export_matrix_year_data(chat_id):
-    # Подключаемся к базе данных
-    with sqlite3.connect('orders_matrix_year.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM orders_matrix_year")
-        rows = cursor.fetchall()
-
-        # Если нет данных в таблице
-        if not rows:
-            bot.send_message(chat_id, "Нет данных для выгрузки.")
-            return
-
-        # Создаём CSV
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['order_id', 'user_id', 'first_name', 'last_name', 'subscription_duration'])
-        writer.writerows(rows)
-        output.seek(0)  # Возвращаемся к началу файла
-
-        # Отправляем файл
-        bot.send_message(chat_id, "Выгрузка подписчиков 'Матрица года':")
-        bot.send_document(chat_id, io.BytesIO(output.getvalue().encode('utf-8')),
-                          filename="matrix_year_subscribers.csv")
-
-
 # Функция для отображения меню редактирования товаров
 def edit_products_menu(chat_id):
     markup = InlineKeyboardMarkup()
@@ -855,7 +812,7 @@ def edit_products_menu(chat_id):
     markup.add(InlineKeyboardButton("Личный бренд", callback_data='edit_personal_brand'))
     markup.add(InlineKeyboardButton("💸Купить", callback_data='edit_💸buy'))
     markup.add(InlineKeyboardButton("💴Купить", callback_data='edit_💴buy'))
-    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='admin_menu'))
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data='admin_back'))
 
     bot.send_message(chat_id, "Выберите товар для редактирования:", reply_markup=markup)
 
@@ -1237,7 +1194,7 @@ def callback_inline(call):
 
     elif call.data == '💸Купить':
         text = """Тариф: МАТРИЦА ГОДА
-    Стоимость: ~2 025.00~ 1 590.00 🇷🇺RUB
+    Стоимость: ~~~2 025.00~~ 1 590.00 🇷🇺RUB
     Срок действия: 12 месяцев"""
 
         keyboard = InlineKeyboardMarkup()
@@ -1249,7 +1206,8 @@ def callback_inline(call):
                 text=text,
                 chat_id=chat_id,
                 message_id=call.message.message_id,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
             )
             user_data[chat_id] = {'state': '💸buy'}
         except Exception as e:
@@ -1257,7 +1215,8 @@ def callback_inline(call):
             sent = bot.send_message(
                 chat_id,
                 text=text,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
             )
             user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💸buy'}
 
@@ -1265,7 +1224,7 @@ def callback_inline(call):
 
     elif call.data == '💴Купить':
         text = """Тариф: Купить авторское пособие «Личный бренд»
-    Стоимость: ~2 990.00~ 1 590.00 🇷🇺RUB
+    Стоимость: ~~~2 990.00~~ 1 590.00 🇷🇺RUB
     Срок действия: бессрочно"""
 
         keyboard = InlineKeyboardMarkup()
@@ -1277,7 +1236,8 @@ def callback_inline(call):
                 text=text,
                 chat_id=chat_id,
                 message_id=call.message.message_id,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
             )
             user_data[chat_id] = {'state': '💴buy'}
         except Exception as e:
@@ -1285,7 +1245,8 @@ def callback_inline(call):
             sent = bot.send_message(
                 chat_id,
                 text=text,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
             )
             user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💴buy'}
 
@@ -1451,11 +1412,6 @@ def callback_inline(call):
         bot.send_message(chat_id, "Введите название нового товара.")
         user_data[chat_id] = {'editing': 'create_new_product_name'}
 
-    elif call.data == 'export_personal_brand':
-        export_personal_brand_data(chat_id)  # Выгрузка данных для "Личный бренд"
-
-    elif call.data == 'export_matrix_year':
-        export_matrix_year_data(chat_id)  # Выгрузка данных для "Матрица года"
 
     elif call.data == 'edit_matrix_year':
         # Логика редактирования "Матрица года"
