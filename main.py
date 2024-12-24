@@ -1192,65 +1192,65 @@ def callback_inline(call):
         # Увеличиваем счетчик нажатий на кнопку "Личный бренд"
         increment_button_press('Личный бренд')  # Исправлено с 'Матрица года' на 'Личный бренд'
 
-    elif call.data == '💸Купить':
-        text = """Тариф: МАТРИЦА ГОДА
-    Стоимость: ~~~2 025.00~~ 1 590.00 🇷🇺RUB
-    Срок действия: 12 месяцев"""
+elif call.data == '💸Купить':
+    text = """Тариф: МАТРИЦА ГОДА
+Стоимость: ~~~2 025\\.00~~ 1 590\\.00 🇷🇺RUB
+Срок действия: 12 месяцев"""
 
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💳Оплатить", callback_data='💳Оплатить'))
-        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Матрица года'))
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("💳Оплатить", callback_data='💳Оплатить'))
+    keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Матрица года'))
 
-        try:
-            bot.edit_message_text(
-                text=text,
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=keyboard,
-                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
-            )
-            user_data[chat_id] = {'state': '💸buy'}
-        except Exception as e:
-            logging.warning(f"Не удалось отредактировать сообщение: {e}")
-            sent = bot.send_message(
-                chat_id,
-                text=text,
-                reply_markup=keyboard,
-                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
-            )
-            user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💸buy'}
+    try:
+        bot.edit_message_text(
+            text=text,
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=keyboard,
+            parse_mode='MarkdownV2'  # Указываем MarkdownV2 для корректного отображения зачёркивания
+        )
+        user_data[chat_id] = {'state': '💸buy'}
+    except Exception as e:
+        logging.warning(f"Не удалось отредактировать сообщение: {e}")
+        sent = bot.send_message(
+            chat_id,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode='MarkdownV2'
+        )
+        user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💸buy'}
 
-        increment_button_press('💸Купить')
+    increment_button_press('💸Купить')
 
-    elif call.data == '💴Купить':
-        text = """Тариф: Купить авторское пособие «Личный бренд»
-    Стоимость: ~~~2 990.00~~ 1 590.00 🇷🇺RUB
-    Срок действия: бессрочно"""
+elif call.data == '💴Купить':
+    text = """Тариф: Купить авторское пособие «Личный бренд»
+Стоимость: ~~~2 990\\.00~~ 1 590\\.00 🇷🇺RUB
+Срок действия: бессрочно"""
 
-        keyboard = InlineKeyboardMarkup()
-        keyboard.add(InlineKeyboardButton("💴Оплатить", callback_data='💴Оплатить'))
-        keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Личный бренд'))
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(InlineKeyboardButton("💴Оплатить", callback_data='💴Оплатить'))
+    keyboard.add(InlineKeyboardButton("⬅️ Назад", callback_data='Личный бренд'))
 
-        try:
-            bot.edit_message_text(
-                text=text,
-                chat_id=chat_id,
-                message_id=call.message.message_id,
-                reply_markup=keyboard,
-                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
-            )
-            user_data[chat_id] = {'state': '💴buy'}
-        except Exception as e:
-            logging.warning(f"Не удалось отредактировать сообщение: {e}")
-            sent = bot.send_message(
-                chat_id,
-                text=text,
-                reply_markup=keyboard,
-                parse_mode='MarkdownV2'  # Обязательно указать MarkdownV2 для форматирования
-            )
-            user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💴buy'}
+    try:
+        bot.edit_message_text(
+            text=text,
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=keyboard,
+            parse_mode='MarkdownV2'
+        )
+        user_data[chat_id] = {'state': '💴buy'}
+    except Exception as e:
+        logging.warning(f"Не удалось отредактировать сообщение: {e}")
+        sent = bot.send_message(
+            chat_id,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode='MarkdownV2'
+        )
+        user_data[chat_id] = {'last_message_id': sent.message_id, 'state': '💴buy'}
 
-        increment_button_press('💴Купить')
+    increment_button_press('💴Купить')
 
     elif call.data == '💴Оплатить':
         user_id = chat_id
