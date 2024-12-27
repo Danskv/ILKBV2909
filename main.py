@@ -1335,13 +1335,12 @@ def callback_inline(call):
     elif call.data == 'edit_matrix_year':
         # Логика редактирования "Матрица года"
         bot.send_message(chat_id, "Вы выбрали редактирование Матрицы года.")
-        # Перейдите к состоянию редактирования
+        # Устанавливаем состояние редактирования
         user_data[chat_id] = {'editing': 'matrix_year_description'}
 
     elif call.data == 'edit_products':
-        if chat_id in ADMIN_IDS:
-            # Логика редактирования товаров
-            edit_products_menu(chat_id)
+        if chat_id in ADMIN_IDS:  # Проверяем, является ли пользователь администратором
+            edit_products_menu(chat_id)  # Показываем меню редактирования
         else:
             bot.answer_callback_query(call.id, "У вас нет доступа к этому разделу.")
 
@@ -1352,6 +1351,10 @@ def callback_inline(call):
     elif call.data == 'edit_💸buy':
         bot.send_message(chat_id, "Введите новое описание для '💸 Купить'.")
         user_data[chat_id] = {'editing': '💸buy_description'}
+
+    elif call.data == 'edit_💴buy':
+        bot.send_message(chat_id, "Введите новое описание для '💴 Купить'.")
+        user_data[chat_id] = {'editing': '💴buy_description'}
 
 
     # Добавить изображение
